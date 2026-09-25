@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luna — Despesas de Loja</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bordo:#6B1E2E; --bordo-dark:#4A1220; --bordo-light:#8B3345;
+    --creme:#F5EFE4; --creme-dark:#EDE4D4; --marrom:#A0785A;
+    --marrom-light:#C4A882; --marrom-dark:#7A5840;
+    --text:#2C1810; --text-light:#6B4F3A; --white:#FDFAF6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{overflow-x:hidden;max-width:100vw}
+  body{font-family:'Jost',sans-serif;background:var(--creme);color:var(--text);min-height:100vh}
+  a{color:inherit}
+
+  #carregandoOverlay{position:fixed;inset:0;z-index:99999;background:linear-gradient(145deg,#4A1220 0%,#2C0A14 60%,#1A0008 100%);display:flex;align-items:center;justify-content:center;color:#C4A882;font-size:.85rem;letter-spacing:.1em;text-transform:uppercase;text-align:center;padding:20px}
+
+  #appRoot{display:none}
+  header{background:var(--bordo);color:var(--creme);padding:14px 26px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;box-shadow:0 2px 14px rgba(74,18,32,.25)}
+  .brand{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:1.4rem}
+  .brand-sub{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--marrom-light);margin-top:-2px}
+  header .spacer{flex:1}
+  .hbtn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);color:var(--creme);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:.78rem;text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:background .15s}
+  .hbtn:hover{background:rgba(255,255,255,.22)}
+
+  nav.tabs{display:flex;gap:2px;background:var(--white);border-bottom:1px solid var(--creme-dark);padding:0 26px;overflow-x:auto}
+  .tab{padding:14px 18px;font-size:.82rem;font-weight:500;color:var(--text-light);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  .tab.active{color:var(--bordo);border-bottom-color:var(--bordo);font-weight:600}
+
+  main{max-width:1240px;margin:0 auto;padding:28px 26px 60px}
+  .card{background:var(--white);border:1px solid var(--creme-dark);border-radius:12px;padding:22px;margin-bottom:18px}
+  .card h2{font-family:'Cormorant Garamond',serif;font-size:1.3rem;color:var(--bordo-dark);margin-bottom:14px}
+  .card h3{font-family:'Cormorant Garamond',serif;font-size:1.05rem;color:var(--bordo-dark);margin:6px 0 10px}
+  .hint{font-size:.78rem;color:var(--text-light)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+  .field{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .field label{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);font-weight:500}
+  .inp,select.inp,textarea.inp{padding:9px 12px;border:1.5px solid var(--creme-dark);border-radius:7px;font-family:'Jost',sans-serif;font-size:.85rem;color:var(--text);background:var(--white);width:100%}
+  .inp:focus{outline:none;border-color:var(--marrom)}
+  .inp.num{text-align:right}
+  .btn{background:var(--bordo);color:var(--creme);border:none;padding:10px 18px;border-radius:7px;font-size:.78rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;transition:background .15s}
+  .btn:hover{background:var(--bordo-dark)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn-outline{background:none;border:1.5px solid var(--bordo);color:var(--bordo)}
+  .btn-outline:hover{background:var(--bordo);color:var(--creme)}
+  .btn-sm{padding:6px 12px;font-size:.72rem}
+  .lnk{background:none;border:none;color:var(--bordo);cursor:pointer;font-size:.78rem;text-decoration:underline;font-family:inherit}
+  .lnk.danger{color:#B43C3C}
+
+  .grid-form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 14px;margin-bottom:14px}
+  .span2{grid-column:span 2}.span4{grid-column:span 4}
+
+  .preview{background:var(--creme);border-radius:10px;padding:14px 16px;margin:4px 0 16px}
+  .preview .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .chip{background:var(--white);border:1px solid var(--creme-dark);border-radius:8px;padding:6px 10px;font-size:.78rem}
+  .chip b{color:var(--bordo-dark);font-weight:600}
+
+  .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:.82rem}
+  th{text-align:left;padding:9px 10px;background:var(--creme);color:var(--text-light);font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
+  td{padding:9px 10px;border-top:1px solid var(--creme-dark);vertical-align:top}
+  td.r,th.r{text-align:right;white-space:nowrap}
+  tr.total-row td{font-weight:600;border-top:2px solid var(--creme-dark);background:var(--creme)}
+  tr.clicavel{cursor:pointer}
+  tr.clicavel:hover td{background:#FBF6EE}
+  tr.det td{background:#FBF6EE;border-top:none;padding-top:0}
+  table.matriz td,table.matriz th{white-space:nowrap}
+  table.matriz td:first-child,table.matriz th:first-child{position:sticky;left:0;background:var(--white);z-index:1}
+  table.matriz th:first-child{background:var(--creme)}
+  table.matriz tr.total-row td:first-child{background:var(--creme)}
+  td.zero{color:#C9B9A6}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.68rem;font-weight:600;white-space:nowrap;background:var(--creme);color:var(--marrom-dark)}
+
+  .empty{text-align:center;padding:40px;color:var(--text-light);font-size:.85rem}
+  .loading{text-align:center;padding:30px;color:var(--text-light)}
+
+  .stat-box{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .stat{background:var(--creme);border-radius:10px;padding:16px 20px;min-width:160px}
+  .stat .num{font-family:'Cormorant Garamond',serif;font-size:1.7rem;color:var(--bordo-dark);font-weight:600;line-height:1}
+  .stat .lbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);margin-top:6px}
+
+  .msg{font-size:.8rem;margin:8px 0;display:none}
+  .msg.show{display:block}
+  .msg.err{color:#B43C3C}
+  .msg.ok{color:#27AE60}
+  .edit-banner{background:#FFF6E0;border:1px solid #F0D99A;color:#7A5A12;border-radius:8px;padding:10px 14px;font-size:.8rem;margin-bottom:14px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+
+  @media (max-width:760px){
+    .grid-form{grid-template-columns:1fr 1fr}
+    .span2,.span4{grid-column:span 2}
+  }
+  @media (max-width:600px){
+    header{padding:12px 16px}
+    nav.tabs{padding:0 16px}
+    main{padding:20px 16px 50px}
+    .card{padding:16px}
+  }
+</style>
+</head>
+<body>
+
+<div id="carregandoOverlay">Carregando…</div>
+
+<div id="appRoot">
+<header>
+  <div>
+    <div class="brand">LUNA <span style="font-size:.7em;font-weight:400">Despesas</span></div>
+    <div class="brand-sub">Controle de Despesas de Loja</div>
+  </div>
+  <div class="spacer"></div>
+  <a href="https://thiagodlborges.github.io/Sistema-Luna/" class="hbtn">← Sistema Luna</a>
+  <button class="hbtn" onclick="sairApp()">Sair</button>
+</header>
+
+<nav class="tabs">
+  <div class="tab active" data-tab="nova" onclick="mudarTab('nova')">➕ Nova Despesa</div>
+  <div class="tab" data-tab="lancamentos" onclick="mudarTab('lancamentos')">📋 Lançamentos</div>
+  <div class="tab" data-tab="apuracao" onclick="mudarTab('apuracao')">📊 Apuração Mensal</div>
+</nav>
+
+<main id="mainContent"><div class="loading">Carregando…</div></main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const SUPABASE_URL = 'https://pbuhwpcpdcnaheaywmdv.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBidWh3cGNwZGNuYWhlYXl3bWR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNjU5MzksImV4cCI6MjA5MTg0MTkzOX0.Mg4PVg96ZiV3C2Rn0GLQU9c7ui_41OlU6Ldqn5jcvyY';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const PORTAL_URL = 'https://thiagodlborges.github.io/Sistema-Luna/';
+const SLUG = 'despesas_loja';
+const $ = id => document.getElementById(id);
+
+const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Praça da Moça - Diadema','Buriti Mogi Guaçu','SP Market','Iguatemi Campinas','Shopping Itaquera','Atrium'];
+const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
+const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+
+let meuPerfil = null;
+let minhasLojas = [];
+let souMaster = false;
+let currentTab = 'nova';
+let editando = null;         // despesa em edição (master)
+let cacheLancamentos = [];
+let cacheApuracao = null;
+
+// ── Utilidades ────────────────────────────────────────────
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtData(d){ return d ? new Date(d+'T12:00').toLocaleDateString('pt-BR') : '—'; }
+function fmtMoeda(v){ return (Number(v)||0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
+function fmtNum(v){ return (Number(v)||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function fmtMes(d){ if(!d) return '—'; const [a,m] = d.slice(0,7).split('-').map(Number); return MESES_ABREV[m-1]+'/'+String(a).slice(2); }
+function hojeISO(){ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,10); }
+function showMsg(id, txt, tipo){ const m=$(id); if(!m) return; m.textContent=txt; m.className='msg'+(txt?' show '+(tipo||''):''); }
+
+// Aceita "1.234,56", "1234,56", "1234.56", "R$ 1.234,56"
+function parseNumBR(s){
+  if(s==null) return NaN;
+  let t = String(s).replace(/[R$\s]/g,'').trim();
+  if(!t) return NaN;
+  if(t.includes(',')) t = t.replace(/\./g,'').replace(',', '.');
+  else if((t.match(/\./g)||[]).length > 1) t = t.replace(/\./g,'');
+  const n = Number(t);
+  return isFinite(n) ? n : NaN;
+}
+
+function addMeses(mesISO, n){ // mesISO = 'YYYY-MM'
+  const [a,m] = mesISO.split('-').map(Number);
+  const d = new Date(a, m-1+n, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+
+// Mesmo rateio do banco: parcelas iguais truncadas em centavos, resto na última
+function calcularParcelas(valorTotal, mesInicial, qtd){
+  const totalCent = Math.round(valorTotal*100);
+  const baseCent = Math.floor(totalCent/qtd);
+  const out = [];
+  for(let i=0;i<qtd;i++){
+    const cent = (i===qtd-1) ? totalCent - baseCent*(qtd-1) : baseCent;
+    out.push({ numero:i+1, mes:addMeses(mesInicial,i), valor:cent/100 });
+  }
+  return out;
+}
+
+async function buscarTudo(queryFactory){
+  const passo = 1000; let de = 0; const tudo = [];
+  while(true){
+    const { data, error } = await queryFactory().range(de, de+passo-1);
+    if(error) throw error;
+    tudo.push(...(data||[]));
+    if(!data || data.length < passo) break;
+    de += passo;
+  }
+  return tudo;
+}
+
+function optsLojas(sel, incluirTodas){
+  let h = '';
+  if(incluirTodas && minhasLojas.length > 1) h += '<option value="">Todas as lojas</option>';
+  h += minhasLojas.map(l => '<option value="'+esc(l)+'"'+(l===sel?' selected':'')+'>'+esc(l)+'</option>').join('');
+  return h;
+}
+function optsContas(sel, incluirTodas){
+  return (incluirTodas?'<option value="">Todas as contas</option>':'') +
+    CONTAS.map(c => '<option value="'+esc(c)+'"'+(c===sel?' selected':'')+'>'+esc(c)+'</option>').join('');
+}
+
+// ── Acesso ────────────────────────────────────────────────
+async function sairApp(){ await sb.auth.signOut(); window.location.href = PORTAL_URL; }
+
+async function verificarAcessoEIniciar(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ window.location.href = PORTAL_URL; return; }
+
+  const { data: ok, error } = await sb.rpc('tem_acesso', { p_slug: SLUG });
+  if(error || !ok){ alert('Você não tem acesso ao módulo de Despesas de Loja.'); window.location.href = PORTAL_URL; return; }
+
+  const { data: perfil } = await sb.from('perfis').select('*').eq('id', session.user.id).single();
+  if(!perfil){ window.location.href = PORTAL_URL; return; }
+  meuPerfil = perfil;
+  souMaster = perfil.tipo === 'master';
+
+  if(['master','master_loja','backoffice'].includes(perfil.tipo)) minhasLojas = [...TODAS_LOJAS];
+  else if(perfil.lojas && perfil.lojas.length) minhasLojas = perfil.lojas;
+  else if(perfil.loja) minhasLojas = [perfil.loja];
+  else minhasLojas = [];
+
+  if(!minhasLojas.length){
+    document.getElementById('carregandoOverlay').textContent = 'Seu perfil não tem loja vinculada. Fale com o master.';
+    return;
+  }
+
+  $('appRoot').style.display = 'block';
+  $('carregandoOverlay').remove();
+  renderTab();
+}
+
+function mudarTab(tab){
+  currentTab = tab;
+  if(tab !== 'nova') editando = null;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
+  renderTab();
+}
+function renderTab(){
+  if(currentTab==='nova') renderNova();
+  else if(currentTab==='lancamentos') renderLancamentos();
+  else renderApuracao();
+}
+
+// ── NOVA DESPESA ──────────────────────────────────────────
+function renderNova(){
+  const e = editando;
+  const mesAtual = hojeISO().slice(0,7);
+  const mesIni = e ? e._mesInicial : mesAtual;
+  $('mainContent').innerHTML =
+    '<div class="card">'+
+      '<h2>'+(e ? 'Editar lançamento '+esc(e.numero) : 'Nova despesa')+'</h2>'+
+      (e ? '<div class="edit-banner"><span>Você está editando um lançamento existente. As parcelas serão recalculadas ao salvar.</span><button class="lnk" onclick="cancelarEdicao()">Cancelar edição</button></div>' : '')+
+      '<div class="grid-form">'+
+        '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>'+
+        '<div class="field span2"><label>Conta contábil</label><select class="inp" id="dConta"><option value="">Selecione…</option>'+optsContas(e?e.conta_contabil:'', false)+'</select></div>'+
+        '<div class="field span2"><label>Descrição</label><input class="inp" id="dDesc" maxlength="200" placeholder="Ex.: Manutenção do ar-condicionado" value="'+esc(e?e.descricao:'')+'"></div>'+
+        '<div class="field span2"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
+        '<div class="field"><label>Data do lançamento</label><input class="inp" type="date" id="dData" value="'+(e?e.data_lancamento:hojeISO())+'"></div>'+
+        '<div class="field"><label>Valor total (R$)</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label>Mês de apuração inicial</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
+        '<div class="field"><label>Nº de meses (parcelas)</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:1)+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
+      '</div>'+
+      '<div class="preview" id="dPreview"></div>'+
+      '<div class="msg" id="dMsg"></div>'+
+      '<button class="btn" id="btnSalvar" onclick="salvarDespesa()">'+(e?'Salvar alterações':'Lançar despesa')+'</button>'+
+    '</div>';
+  atualizarPreview();
+}
+
+function atualizarPreview(){
+  const box = $('dPreview'); if(!box) return;
+  const valor = parseNumBR($('dValor').value);
+  const qtd = parseInt($('dQtd').value, 10);
+  const mes = $('dMes').value;
+  if(!(valor>0) || !(qtd>=1) || !mes){
+    box.innerHTML = '<span class="hint">Informe o valor total, o mês de apuração e o número de meses para ver o rateio.</span>';
+    return;
+  }
+  if(qtd > 60){ box.innerHTML = '<span class="hint" style="color:#B43C3C">Máximo de 60 meses.</span>'; return; }
+  const parcelas = calcularParcelas(valor, mes, qtd);
+  box.innerHTML =
+    '<div class="hint">'+(qtd===1
+      ? 'Despesa integral em <b>'+fmtMes(mes)+'</b>.'
+      : 'Rateio igual de <b>'+fmtMoeda(valor)+'</b> em <b>'+qtd+' meses</b> ('+fmtMes(parcelas[0].mes)+' a '+fmtMes(parcelas[qtd-1].mes)+').')+
+    '</div>'+
+    '<div class="chips">'+parcelas.map(p => '<span class="chip">'+p.numero+'/'+qtd+' · '+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+'</div>';
+}
+
+function cancelarEdicao(){ editando = null; mudarTab('lancamentos'); }
+
+async function salvarDespesa(){
+  const loja = $('dLoja').value;
+  const conta = $('dConta').value;
+  const desc = $('dDesc').value.trim();
+  const forn = $('dForn').value.trim();
+  const data = $('dData').value;
+  const valor = parseNumBR($('dValor').value);
+  const mes = $('dMes').value;
+  const qtd = parseInt($('dQtd').value, 10);
+  const obs = $('dObs').value.trim();
+
+  if(!loja) return showMsg('dMsg','Selecione a loja.','err');
+  if(!conta) return showMsg('dMsg','Selecione a conta contábil.','err');
+  if(!desc) return showMsg('dMsg','Informe a descrição da despesa.','err');
+  if(!data) return showMsg('dMsg','Informe a data do lançamento.','err');
+  if(!(valor>0)) return showMsg('dMsg','Informe um valor total válido (use vírgula para centavos).','err');
+  if(!mes) return showMsg('dMsg','Informe o mês de apuração.','err');
+  if(!(qtd>=1 && qtd<=60)) return showMsg('dMsg','O número de meses deve ser entre 1 e 60.','err');
+
+  const btn = $('btnSalvar'); btn.disabled = true; btn.textContent = 'Salvando…';
+  const { data: res, error } = await sb.rpc('despesas_loja_salvar', {
+    p_id: editando ? editando.id : null,
+    p_loja: loja, p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
+    p_data: data, p_valor_total: Math.round(valor*100)/100,
+    p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null,
+  });
+  btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa';
+
+  if(error) return showMsg('dMsg','Erro: '+error.message,'err');
+  const r = Array.isArray(res) ? res[0] : res;
+  if(editando){
+    editando = null;
+    alert('Lançamento '+(r&&r.numero||'')+' atualizado.');
+    mudarTab('lancamentos');
+    return;
+  }
+  showMsg('dMsg','Despesa '+(r&&r.numero||'')+' lançada: '+fmtMoeda(r&&r.valor_total)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
+  // limpa campos mantendo loja/conta/data para lançamentos em sequência
+  $('dDesc').value=''; $('dForn').value=''; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
+  atualizarPreview();
+}
+
+// ── LANÇAMENTOS ───────────────────────────────────────────
+function renderLancamentos(){
+  const mesAtual = hojeISO().slice(0,7);
+  $('mainContent').innerHTML =
+    '<div class="card">'+
+      '<h2>Lançamentos</h2>'+
+      '<div class="row">'+
+        '<div class="field" style="min-width:190px"><label>Loja</label><select class="inp" id="fLoja" onchange="carregarLancamentos()">'+optsLojas(minhasLojas.length>1?'':minhasLojas[0], true)+'</select></div>'+
+        '<div class="field" style="min-width:210px"><label>Conta contábil</label><select class="inp" id="fConta" onchange="carregarLancamentos()">'+optsContas('', true)+'</select></div>'+
+        '<div class="field"><label>Filtrar por</label><select class="inp" id="fTipo" onchange="carregarLancamentos()"><option value="lanc">Mês do lançamento</option><option value="apur">Mês de apuração</option></select></div>'+
+        '<div class="field"><label>Mês</label><input class="inp" type="month" id="fMes" value="'+mesAtual+'" onchange="carregarLancamentos()"></div>'+
+        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, nº…" oninput="desenharLancamentos()"></div>'+
+        '<button class="btn btn-outline btn-sm" onclick="exportarLancamentos()">⬇ Excel</button>'+
+      '</div>'+
+      '<div id="lancConteudo" class="loading">Carregando…</div>'+
+    '</div>';
+  carregarLancamentos();
+}
+
+async function carregarLancamentos(){
+  const wrap = $('lancConteudo'); wrap.className='loading'; wrap.innerHTML='Carregando…';
+  const loja = $('fLoja').value, conta = $('fConta').value, tipo = $('fTipo').value, mes = $('fMes').value;
+  try{
+    let ids = null;
+    if(mes && tipo==='apur'){
+      const parc = await buscarTudo(() => sb.from('despesas_loja_parcelas').select('despesa_id').eq('mes_apuracao', mes+'-01'));
+      ids = [...new Set(parc.map(p=>p.despesa_id))];
+      if(!ids.length){ cacheLancamentos=[]; desenharLancamentos(); return; }
+    }
+    const lista = [];
+    const blocos = ids ? Array.from({length:Math.ceil(ids.length/150)}, (_,i)=>ids.slice(i*150,(i+1)*150)) : [null];
+    for(const bloco of blocos){
+      const parte = await buscarTudo(() => {
+        let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
+        if(loja) q = q.eq('loja', loja);
+        if(conta) q = q.eq('conta_contabil', conta);
+        if(bloco) q = q.in('id', bloco);
+        else if(mes){
+          q = q.gte('data_lancamento', mes+'-01').lt('data_lancamento', addMeses(mes,1)+'-01');
+        }
+        return q.order('data_lancamento', { ascending:false }).order('numero', { ascending:false });
+      });
+      lista.push(...parte);
+    }
+    lista.forEach(d => (d.despesas_loja_parcelas||[]).sort((a,b)=>a.numero_parcela-b.numero_parcela));
+    lista.sort((a,b) => (b.data_lancamento||'').localeCompare(a.data_lancamento||'') || (b.numero||'').localeCompare(a.numero||''));
+    cacheLancamentos = lista;
+    desenharLancamentos();
+  }catch(err){
+    wrap.className='empty'; wrap.innerHTML = 'Erro ao carregar: '+esc(err.message);
+  }
+}
+
+function filtrarBusca(lista){
+  const b = ($('fBusca') && $('fBusca').value || '').trim().toLowerCase();
+  if(!b) return lista;
+  return lista.filter(d => [d.numero,d.descricao,d.fornecedor,d.observacao,d.registrado_por_nome].some(x => (x||'').toLowerCase().includes(b)));
+}
+
+function desenharLancamentos(){
+  const wrap = $('lancConteudo'); if(!wrap) return;
+  const lista = filtrarBusca(cacheLancamentos);
+  const tipo = $('fTipo').value, mes = $('fMes').value;
+  if(!lista.length){ wrap.className='empty'; wrap.innerHTML='Nenhum lançamento encontrado para os filtros escolhidos.'; return; }
+  wrap.className='';
+
+  const total = lista.reduce((a,d)=>a+Number(d.valor_total),0);
+  const noMes = (tipo==='apur' && mes)
+    ? lista.reduce((a,d)=>a+(d.despesas_loja_parcelas||[]).filter(p=>p.mes_apuracao.slice(0,7)===mes).reduce((s,p)=>s+Number(p.valor),0),0)
+    : null;
+
+  wrap.innerHTML =
+    '<div class="stat-box">'+
+      '<div class="stat"><div class="num">'+lista.length+'</div><div class="lbl">Lançamentos</div></div>'+
+      '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">Valor total lançado</div></div>'+
+      (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
+    '</div>'+
+    '<div class="table-wrap"><table><thead><tr>'+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(souMaster?'<th></th>':'')+
+    '</tr></thead><tbody>'+
+    lista.map(d => {
+      const ps = d.despesas_loja_parcelas||[];
+      const periodo = ps.length ? (ps.length===1 ? fmtMes(ps[0].mes_apuracao) : ps.length+'× · '+fmtMes(ps[0].mes_apuracao)+' a '+fmtMes(ps[ps.length-1].mes_apuracao)) : '—';
+      return '<tr class="clicavel" onclick="toggleDet(\''+d.id+'\')">'+
+        '<td><b>'+esc(d.numero)+'</b></td>'+
+        '<td>'+fmtData(d.data_lancamento)+'</td>'+
+        '<td>'+esc(d.loja)+'</td>'+
+        '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
+        '<td>'+esc(d.descricao)+'</td>'+
+        '<td>'+esc(d.fornecedor||'—')+'</td>'+
+        '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
+        '<td>'+periodo+'</td>'+
+        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()"><button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button></td>' : '')+
+      '</tr>'+
+      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(souMaster?9:8)+'">'+
+        '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
+          ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
+        '</div>'+
+        '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
+      '</td></tr>';
+    }).join('')+
+    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(souMaster?2:1)+'"></td></tr>'+
+    '</tbody></table></div>'+
+    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
+}
+
+function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
+
+function editarDespesa(id){
+  const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  const ps = d.despesas_loja_parcelas||[];
+  editando = { ...d, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7) };
+  currentTab = 'nova';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='nova'));
+  renderNova();
+  window.scrollTo(0,0);
+}
+
+async function excluirDespesa(id){
+  const d = cacheLancamentos.find(x=>x.id===id);
+  if(!confirm('Excluir o lançamento '+(d?d.numero:'')+' e todas as suas parcelas? Essa ação não pode ser desfeita.')) return;
+  const { error } = await sb.from('despesas_loja').delete().eq('id', id);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  carregarLancamentos();
+}
+
+function exportarLancamentos(){
+  const lista = filtrarBusca(cacheLancamentos);
+  if(!lista.length){ alert('Não há dados para exportar.'); return; }
+  const linhas = lista.map(d => {
+    const ps = d.despesas_loja_parcelas||[];
+    return {
+      'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
+      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Valor total (R$)': Number(d.valor_total),
+      'Parcelas': ps.length, 'Mês inicial': ps.length?fmtMes(ps[0].mes_apuracao):'', 'Mês final': ps.length?fmtMes(ps[ps.length-1].mes_apuracao):'',
+      'Lançado por': d.registrado_por_nome||'', 'Observação': d.observacao||'',
+    };
+  });
+  const parcelas = [];
+  lista.forEach(d => (d.despesas_loja_parcelas||[]).forEach(p => parcelas.push({
+    'Nº': d.numero, 'Loja': d.loja, 'Conta contábil': d.conta_contabil, 'Descrição': d.descricao,
+    'Parcela': p.numero_parcela+'/'+d.despesas_loja_parcelas.length, 'Mês de apuração': fmtMes(p.mes_apuracao), 'Valor (R$)': Number(p.valor),
+  })));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), 'Lançamentos');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(parcelas), 'Parcelas');
+  XLSX.writeFile(wb, 'despesas-lancamentos-'+($('fMes').value||'todos')+'.xlsx');
+}
+
+// ── APURAÇÃO MENSAL ───────────────────────────────────────
+function renderApuracao(){
+  const anoAtual = new Date().getFullYear();
+  const anos = []; for(let a=anoAtual+1; a>=anoAtual-3; a--) anos.push(a);
+  $('mainContent').innerHTML =
+    '<div class="card">'+
+      '<h2>Apuração mensal por conta contábil</h2>'+
+      '<p class="hint" style="margin-bottom:14px">Valores por mês de apuração: despesas lançadas em vários meses aparecem rateadas em cada mês.</p>'+
+      '<div class="row">'+
+        '<div class="field"><label>Ano</label><select class="inp" id="aAno" onchange="carregarApuracao()">'+anos.map(a=>'<option'+(a===anoAtual?' selected':'')+'>'+a+'</option>').join('')+'</select></div>'+
+        '<div class="field" style="min-width:200px"><label>Loja</label><select class="inp" id="aLoja" onchange="carregarApuracao()">'+optsLojas(minhasLojas.length>1?'':minhasLojas[0], true)+'</select></div>'+
+        '<div style="flex:1"></div>'+
+        '<button class="btn btn-outline btn-sm" onclick="exportarApuracao()">⬇ Excel</button>'+
+      '</div>'+
+      '<div id="apurConteudo" class="loading">Carregando…</div>'+
+    '</div>';
+  carregarApuracao();
+}
+
+async function carregarApuracao(){
+  const wrap = $('apurConteudo'); wrap.className='loading'; wrap.innerHTML='Carregando…';
+  const ano = Number($('aAno').value), loja = $('aLoja').value;
+  try{
+    const dados = await buscarTudo(() => {
+      let q = sb.from('despesas_loja_parcelas')
+        .select('mes_apuracao, valor, despesas_loja!inner(loja, conta_contabil)')
+        .gte('mes_apuracao', ano+'-01-01').lte('mes_apuracao', ano+'-12-01');
+      if(loja) q = q.eq('despesas_loja.loja', loja);
+      return q.order('id');
+    });
+    // matriz conta × mês
+    const mat = {}; CONTAS.forEach(c => mat[c] = Array(12).fill(0));
+    const porLoja = {};
+    dados.forEach(p => {
+      const m = Number(p.mes_apuracao.slice(5,7)) - 1;
+      const c = p.despesas_loja.conta_contabil, l = p.despesas_loja.loja;
+      if(!mat[c]) mat[c] = Array(12).fill(0);
+      mat[c][m] += Number(p.valor);
+      if(!porLoja[l]) porLoja[l] = Array(12).fill(0);
+      porLoja[l][m] += Number(p.valor);
+    });
+    cacheApuracao = { ano, loja, mat, porLoja };
+    desenharApuracao();
+  }catch(err){
+    wrap.className='empty'; wrap.innerHTML='Erro ao carregar: '+esc(err.message);
+  }
+}
+
+function desenharApuracao(){
+  const { ano, loja, mat, porLoja } = cacheApuracao;
+  const wrap = $('apurConteudo'); wrap.className='';
+  const r2 = v => Math.round(v*100)/100;
+  const totMes = Array(12).fill(0);
+  Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
+  const totAno = totMes.reduce((a,b)=>a+b,0);
+  const mesesComValor = totMes.filter(v=>r2(v)!==0).length;
+  const cel = v => r2(v)===0 ? '<td class="r zero">—</td>' : '<td class="r">'+fmtNum(v)+'</td>';
+  const head = '<tr><th>__</th>'+MESES_ABREV.map(m=>'<th class="r">'+m+'</th>').join('')+'<th class="r">Total</th></tr>';
+
+  const tabela = (titulo, linhas) =>
+    '<div class="table-wrap"><table class="matriz"><thead>'+head.replace('__', titulo)+'</thead><tbody>'+
+      linhas.map(([nome, arr]) => '<tr><td>'+esc(nome)+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
+      '<tr class="total-row"><td>Total</td>'+totMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno)+'</td></tr>'+
+    '</tbody></table></div>';
+
+  const lojasOrd = Object.keys(porLoja).sort();
+  wrap.innerHTML =
+    '<div class="stat-box">'+
+      '<div class="stat"><div class="num">'+fmtMoeda(totAno)+'</div><div class="lbl">Total '+ano+(loja?' · '+esc(loja):'')+'</div></div>'+
+      '<div class="stat"><div class="num">'+fmtMoeda(mesesComValor?totAno/mesesComValor:0)+'</div><div class="lbl">Média por mês com despesa</div></div>'+
+    '</div>'+
+    '<h3>Por conta contábil (R$)</h3>'+
+    tabela('Conta contábil', Object.keys(mat).map(c => [c, mat[c]]))+
+    (!loja && lojasOrd.length ? '<h3 style="margin-top:24px">Por loja (R$)</h3>'+tabela('Loja', lojasOrd.map(l => [l, porLoja[l]])) : '');
+}
+
+function exportarApuracao(){
+  if(!cacheApuracao){ alert('Não há dados para exportar.'); return; }
+  const { ano, loja, mat, porLoja } = cacheApuracao;
+  const r2 = v => Math.round(v*100)/100;
+  const linha = (rotulo, nome, arr) => {
+    const o = { [rotulo]: nome };
+    MESES_ABREV.forEach((m,i) => o[m+'/'+String(ano).slice(2)] = r2(arr[i]));
+    o['Total'] = r2(arr.reduce((a,b)=>a+b,0));
+    return o;
+  };
+  const totMes = Array(12).fill(0); Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
+  const porConta = Object.keys(mat).map(c => linha('Conta contábil', c, mat[c]));
+  porConta.push(linha('Conta contábil','TOTAL', totMes));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porConta), 'Por conta');
+  if(!loja){
+    const pl = Object.keys(porLoja).sort().map(l => linha('Loja', l, porLoja[l]));
+    pl.push(linha('Loja','TOTAL', totMes));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pl), 'Por loja');
+  }
+  XLSX.writeFile(wb, 'despesas-apuracao-'+ano+(loja?'-'+loja.replace(/\s+/g,'_'):'')+'.xlsx');
+}
+
+verificarAcessoEIniciar();
+</script>
+</body>
+</html>
