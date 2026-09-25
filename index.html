@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Luna — Despesas de Loja</title>
+<title>Luna — Controle de Despesas</title>
+<meta name="robots" content="noindex, nofollow">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -76,6 +77,16 @@
   td.zero{color:#C9B9A6}
   .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.68rem;font-weight:600;white-space:nowrap;background:var(--creme);color:var(--marrom-dark)}
 
+  .rateio-box{border:1.5px dashed var(--marrom-light);border-radius:10px;padding:14px 16px;margin:0 0 14px}
+  .lojas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+  .loja-opt{display:flex;align-items:center;gap:8px;border:1px solid var(--creme-dark);border-radius:8px;padding:8px 10px;font-size:.84rem;cursor:pointer;background:var(--white);min-height:44px}
+  .loja-opt.on{border-color:var(--bordo-light);background:#FBF3F0}
+  .loja-opt input[type=checkbox]{width:16px;height:16px;accent-color:var(--bordo);flex-shrink:0}
+  .loja-opt .nm{flex:1;min-width:0}
+  .pct-wrap{display:flex;align-items:center;gap:4px;font-size:.8rem;color:var(--text-light)}
+  .inp.pct{width:72px;padding:5px 8px;font-size:.82rem}
+  .rateio-rodape{font-size:.78rem;color:var(--text-light);margin-top:10px}
+  .badge-rateio{display:inline-block;margin-top:3px;padding:2px 8px;border-radius:20px;font-size:.66rem;font-weight:600;background:#EFE6F4;color:#5E3F7B;white-space:nowrap}
   .empty{text-align:center;padding:40px;color:var(--text-light);font-size:.85rem}
   .loading{text-align:center;padding:30px;color:var(--text-light)}
 
@@ -110,7 +121,7 @@
 <header>
   <div>
     <div class="brand">LUNA <span style="font-size:.7em;font-weight:400">Despesas</span></div>
-    <div class="brand-sub">Controle de Despesas de Loja</div>
+    <div class="brand-sub">Controle de Despesas</div>
   </div>
   <div class="spacer"></div>
   <a href="https://thiagodlborges.github.io/Sistema-Luna/" class="hbtn">← Sistema Luna</a>
@@ -210,21 +221,51 @@ function optsContas(sel, incluirTodas){
 }
 
 // ── Acesso ────────────────────────────────────────────────
-async function sairApp(){ await sb.auth.signOut(); window.location.href = PORTAL_URL; }
+// O módulo só abre para quem está logado no Sistema Luna (mesmo domínio → mesma sessão).
+// Sem sessão válida, a pessoa vai para a tela de login do portal. `replace` evita que o
+// botão "voltar" traga de volta a página protegida.
+let redirecionando = false;
+function irParaLogin(){
+  if(redirecionando) return;
+  redirecionando = true;
+  window.location.replace(PORTAL_URL);
+}
+
+async function sairApp(){ await sb.auth.signOut(); irParaLogin(); }
 
 async function verificarAcessoEIniciar(){
-  const { data: { session } } = await sb.auth.getSession();
-  if(!session){ window.location.href = PORTAL_URL; return; }
+  let userId = null;
+  try{
+    const { data: { session } } = await sb.auth.getSession();
+    if(!session) return irParaLogin();
+    // Confere a sessão no servidor (token expirado, revogado ou adulterado não passa)
+    const { data: { user }, error: errUser } = await sb.auth.getUser();
+    if(errUser || !user){ await sb.auth.signOut({ scope:'local' }).catch(()=>{}); return irParaLogin(); }
+    userId = user.id;
+  }catch(e){ return irParaLogin(); }
 
   const { data: ok, error } = await sb.rpc('tem_acesso', { p_slug: SLUG });
-  if(error || !ok){ alert('Você não tem acesso ao módulo de Despesas de Loja.'); window.location.href = PORTAL_URL; return; }
+  if(error || !ok){
+    alert('Você não tem acesso ao Controle de Despesas. Fale com o administrador do Sistema Luna.');
+    return irParaLogin();
+  }
 
-  const { data: perfil } = await sb.from('perfis').select('*').eq('id', session.user.id).single();
-  if(!perfil){ window.location.href = PORTAL_URL; return; }
+  const { data: perfil } = await sb.from('perfis').select('*').eq('id', userId).single();
+  if(!perfil) return irParaLogin();
   meuPerfil = perfil;
   souMaster = perfil.tipo === 'master';
 
-  if(['master','master_loja','backoffice'].includes(perfil.tipo)) minhasLojas = [...TODAS_LOJAS];
+  // Se a pessoa sair do Sistema Luna (nesta ou em outra aba) ou a sessão expirar, volta para o login
+  sb.auth.onAuthStateChange((evento, sessao) => {
+    if(evento === 'SIGNED_OUT' || !sessao) irParaLogin();
+  });
+  document.addEventListener('visibilitychange', async () => {
+    if(document.visibilityState !== 'visible') return;
+    const { data: { session } } = await sb.auth.getSession();
+    if(!session) irParaLogin();
+  });
+
+  if(['master','master_loja','backoffice'].includes(perfil.tipo) || perfil.despesas_loja_backoffice === true) minhasLojas = [...TODAS_LOJAS];
   else if(perfil.lojas && perfil.lojas.length) minhasLojas = perfil.lojas;
   else if(perfil.loja) minhasLojas = [perfil.loja];
   else minhasLojas = [];
@@ -252,47 +293,185 @@ function renderTab(){
 }
 
 // ── NOVA DESPESA ──────────────────────────────────────────
+// Estado do rateio entre lojas (só para lançamentos novos)
+let rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
+function podeRatear(){ return !editando && minhasLojas.length > 1; }
+
 function renderNova(){
   const e = editando;
   const mesAtual = hojeISO().slice(0,7);
   const mesIni = e ? e._mesInicial : mesAtual;
+  if(!podeRatear()) rateio.ativo = false;
   $('mainContent').innerHTML =
     '<div class="card">'+
       '<h2>'+(e ? 'Editar lançamento '+esc(e.numero) : 'Nova despesa')+'</h2>'+
       (e ? '<div class="edit-banner"><span>Você está editando um lançamento existente. As parcelas serão recalculadas ao salvar.</span><button class="lnk" onclick="cancelarEdicao()">Cancelar edição</button></div>' : '')+
       '<div class="grid-form">'+
-        '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>'+
+        (podeRatear()
+          ? '<div class="field"><label>Destino da despesa</label><select class="inp" id="dDestino" onchange="onDestinoChange()">'+
+              '<option value="loja"'+(rateio.ativo?'':' selected')+'>Uma loja</option>'+
+              '<option value="rateio"'+(rateio.ativo?' selected':'')+'>Rateio entre lojas</option>'+
+            '</select></div>'+
+            '<div class="field" id="dLojaWrap"'+(rateio.ativo?' style="display:none"':'')+'><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(minhasLojas[0], false)+'</select></div>'
+          : '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>')+
         '<div class="field span2"><label>Conta contábil</label><select class="inp" id="dConta"><option value="">Selecione…</option>'+optsContas(e?e.conta_contabil:'', false)+'</select></div>'+
         '<div class="field span2"><label>Descrição</label><input class="inp" id="dDesc" maxlength="200" placeholder="Ex.: Manutenção do ar-condicionado" value="'+esc(e?e.descricao:'')+'"></div>'+
         '<div class="field span2"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
         '<div class="field"><label>Data do lançamento</label><input class="inp" type="date" id="dData" value="'+(e?e.data_lancamento:hojeISO())+'"></div>'+
-        '<div class="field"><label>Valor total (R$)</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label id="dValorLbl">'+(rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
         '<div class="field"><label>Mês de apuração inicial</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
         '<div class="field"><label>Nº de meses (parcelas)</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:1)+'" oninput="atualizarPreview()"></div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
       '</div>'+
+      '<div id="dRateioBox"></div>'+
       '<div class="preview" id="dPreview"></div>'+
       '<div class="msg" id="dMsg"></div>'+
       '<button class="btn" id="btnSalvar" onclick="salvarDespesa()">'+(e?'Salvar alterações':'Lançar despesa')+'</button>'+
     '</div>';
+  renderRateioBox();
   atualizarPreview();
+}
+
+function onDestinoChange(){
+  rateio.ativo = $('dDestino').value === 'rateio';
+  $('dLojaWrap').style.display = rateio.ativo ? 'none' : '';
+  $('dValorLbl').textContent = rateio.ativo ? 'Valor total a ratear (R$)' : 'Valor total (R$)';
+  renderRateioBox();
+  atualizarPreview();
+}
+
+function lojasRateioOrdenadas(){ return minhasLojas.filter(l => rateio.lojas.has(l)); }
+
+function renderRateioBox(){
+  const box = $('dRateioBox'); if(!box) return;
+  if(!rateio.ativo){ box.innerHTML = ''; return; }
+  const perc = rateio.modo === 'percentual';
+  box.innerHTML =
+    '<div class="rateio-box">'+
+      '<div class="row" style="margin-bottom:10px">'+
+        '<div class="field"><label>Forma de rateio</label><select class="inp" id="dModo" onchange="onModoRateio()">'+
+          '<option value="igual"'+(perc?'':' selected')+'>Por igual entre as lojas</option>'+
+          '<option value="percentual"'+(perc?' selected':'')+'>Por percentual de cada loja</option>'+
+        '</select></div>'+
+        '<button class="btn btn-outline btn-sm" type="button" onclick="marcarTodasLojas(true)">Todas as lojas</button>'+
+        '<button class="btn btn-outline btn-sm" type="button" onclick="marcarTodasLojas(false)">Limpar</button>'+
+        (perc ? '<button class="btn btn-outline btn-sm" type="button" onclick="distribuirPctIgual()">Dividir % por igual</button>' : '')+
+      '</div>'+
+      '<div class="lojas-grid">'+
+        minhasLojas.map((l,i) => {
+          const on = rateio.lojas.has(l);
+          return '<label class="loja-opt'+(on?' on':'')+'">'+
+            '<input type="checkbox" '+(on?'checked':'')+' onchange="toggleLojaRateio('+i+', this.checked)">'+
+            '<span class="nm">'+esc(l)+'</span>'+
+            (perc && on ? '<span class="pct-wrap"><input class="inp num pct" inputmode="decimal" placeholder="0" value="'+esc(rateio.pcts[l]||'')+'" oninput="setPctLoja('+i+', this.value)" onclick="event.stopPropagation()">%</span>' : '')+
+          '</label>';
+        }).join('')+
+      '</div>'+
+      '<div class="rateio-rodape" id="dRateioRodape"></div>'+
+    '</div>';
+}
+
+function onModoRateio(){
+  rateio.modo = $('dModo').value;
+  if(rateio.modo === 'percentual' && !lojasRateioOrdenadas().some(l => rateio.pcts[l])) distribuirPctIgual(true);
+  renderRateioBox(); atualizarPreview();
+}
+function marcarTodasLojas(sim){
+  rateio.lojas = sim ? new Set(minhasLojas) : new Set();
+  if(rateio.modo === 'percentual') distribuirPctIgual(true);
+  renderRateioBox(); atualizarPreview();
+}
+function toggleLojaRateio(i, marcado){
+  const l = minhasLojas[i];
+  if(marcado) rateio.lojas.add(l); else { rateio.lojas.delete(l); delete rateio.pcts[l]; }
+  renderRateioBox(); atualizarPreview();
+}
+function setPctLoja(i, v){ rateio.pcts[minhasLojas[i]] = v; atualizarPreview(); }
+function distribuirPctIgual(semRender){
+  const ls = lojasRateioOrdenadas(); if(!ls.length) return;
+  const base = Math.floor(10000/ls.length)/100;           // 2 casas, resto na última
+  ls.forEach((l,k) => rateio.pcts[l] = fmtNum(k===ls.length-1 ? 100 - base*(ls.length-1) : base));
+  if(semRender !== true){ renderRateioBox(); atualizarPreview(); }
+}
+
+// Mesma regra do banco: igual = divide em centavos com o resto na última loja;
+// percentual = arredonda cada loja e a última recebe o que faltar para fechar o total.
+function calcularRateioLojas(valor){
+  const ls = lojasRateioOrdenadas(), n = ls.length;
+  const totalCent = Math.round(valor*100);
+  if(n < 2) return { erro:'Selecione pelo menos duas lojas para o rateio.' };
+  let pcts;
+  if(rateio.modo === 'igual'){
+    pcts = ls.map(() => 100/n);
+  } else {
+    pcts = ls.map(l => parseNumBR(rateio.pcts[l]));
+    if(pcts.some(p => !(p > 0))) return { erro:'Informe um percentual maior que zero para cada loja marcada.', pcts, ls };
+    const soma = pcts.reduce((a,b)=>a+b,0);
+    if(Math.abs(soma-100) > 0.01) return { erro:'Os percentuais somam '+fmtNum(soma)+'%, mas precisam somar 100%.', pcts, ls, soma };
+  }
+  const vals = []; let acum = 0;
+  const baseIgual = Math.floor(totalCent/n);
+  ls.forEach((l,k) => {
+    let c;
+    if(k === n-1) c = totalCent - acum;
+    else c = rateio.modo === 'igual' ? baseIgual : Math.round(totalCent*pcts[k]/100);
+    acum += c; vals.push(c/100);
+  });
+  if(vals.some(v => v <= 0)) return { erro:'O valor é pequeno demais para ser dividido entre essas lojas.' };
+  return { ls, pcts, vals, soma: pcts.reduce((a,b)=>a+b,0) };
+}
+
+function atualizarRodapeRateio(r){
+  const el = $('dRateioRodape'); if(!el) return;
+  const n = rateio.lojas.size;
+  let txt = n+' loja'+(n===1?'':'s')+' selecionada'+(n===1?'':'s');
+  if(rateio.modo === 'percentual' && n){
+    const soma = lojasRateioOrdenadas().reduce((a,l)=>a+(parseNumBR(rateio.pcts[l])||0),0);
+    const ok = Math.abs(soma-100) <= 0.01;
+    txt += ' · soma dos percentuais: <b style="color:'+(ok?'#27AE60':'#B43C3C')+'">'+fmtNum(soma)+'%</b>'+(ok?'':' (precisa fechar 100%)');
+  }
+  el.innerHTML = txt;
 }
 
 function atualizarPreview(){
   const box = $('dPreview'); if(!box) return;
+  const m = $('dMsg'); if(m && m.classList.contains('err')) showMsg('dMsg','','');
   const valor = parseNumBR($('dValor').value);
   const qtd = parseInt($('dQtd').value, 10);
   const mes = $('dMes').value;
+  if(rateio.ativo) atualizarRodapeRateio();
   if(!(valor>0) || !(qtd>=1) || !mes){
-    box.innerHTML = '<span class="hint">Informe o valor total, o mês de apuração e o número de meses para ver o rateio.</span>';
+    box.innerHTML = '<span class="hint">Informe o valor total, o mês de apuração e o número de meses para ver a divisão.</span>';
     return;
   }
   if(qtd > 60){ box.innerHTML = '<span class="hint" style="color:#B43C3C">Máximo de 60 meses.</span>'; return; }
+
+  if(rateio.ativo){
+    const r = calcularRateioLojas(valor);
+    if(r.erro){ box.innerHTML = '<span class="hint" style="color:#B43C3C">'+esc(r.erro)+'</span>'; return; }
+    const ultimoMes = addMeses(mes, qtd-1);
+    box.innerHTML =
+      '<div class="hint" style="margin-bottom:8px">Rateio de <b>'+fmtMoeda(valor)+'</b> entre <b>'+r.ls.length+' lojas</b> '+
+        (rateio.modo==='igual'?'por igual':'por percentual')+
+        (qtd===1 ? ', apurado em <b>'+fmtMes(mes)+'</b>.' : ', cada loja em <b>'+qtd+' meses</b> ('+fmtMes(mes)+' a '+fmtMes(ultimoMes)+').')+
+      '</div>'+
+      '<div class="table-wrap"><table><thead><tr><th>Loja</th><th class="r">%</th><th class="r">Valor da loja</th>'+(qtd>1?'<th>Por mês</th>':'')+'</tr></thead><tbody>'+
+        r.ls.map((l,k) => {
+          const ps = calcularParcelas(r.vals[k], mes, qtd);
+          const difUlt = qtd>1 && ps[qtd-1].valor !== ps[0].valor;
+          return '<tr><td>'+esc(l)+'</td><td class="r">'+fmtNum(r.pcts[k])+'%</td><td class="r">'+fmtMoeda(r.vals[k])+'</td>'+
+            (qtd>1 ? '<td style="white-space:nowrap">'+qtd+'× '+fmtMoeda(ps[0].valor)+(difUlt?' (última '+fmtMoeda(ps[qtd-1].valor)+')':'')+'</td>' : '')+'</tr>';
+        }).join('')+
+        '<tr class="total-row"><td>Total</td><td class="r">'+fmtNum(r.soma)+'%</td><td class="r">'+fmtMoeda(r.vals.reduce((a,b)=>a+b,0))+'</td>'+(qtd>1?'<td></td>':'')+'</tr>'+
+      '</tbody></table></div>';
+    return;
+  }
+
   const parcelas = calcularParcelas(valor, mes, qtd);
   box.innerHTML =
     '<div class="hint">'+(qtd===1
       ? 'Despesa integral em <b>'+fmtMes(mes)+'</b>.'
-      : 'Rateio igual de <b>'+fmtMoeda(valor)+'</b> em <b>'+qtd+' meses</b> ('+fmtMes(parcelas[0].mes)+' a '+fmtMes(parcelas[qtd-1].mes)+').')+
+      : 'Divisão igual de <b>'+fmtMoeda(valor)+'</b> em <b>'+qtd+' meses</b> ('+fmtMes(parcelas[0].mes)+' a '+fmtMes(parcelas[qtd-1].mes)+').')+
     '</div>'+
     '<div class="chips">'+parcelas.map(p => '<span class="chip">'+p.numero+'/'+qtd+' · '+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+'</div>';
 }
@@ -300,7 +479,7 @@ function atualizarPreview(){
 function cancelarEdicao(){ editando = null; mudarTab('lancamentos'); }
 
 async function salvarDespesa(){
-  const loja = $('dLoja').value;
+  const loja = $('dLoja') ? $('dLoja').value : '';
   const conta = $('dConta').value;
   const desc = $('dDesc').value.trim();
   const forn = $('dForn').value.trim();
@@ -310,7 +489,7 @@ async function salvarDespesa(){
   const qtd = parseInt($('dQtd').value, 10);
   const obs = $('dObs').value.trim();
 
-  if(!loja) return showMsg('dMsg','Selecione a loja.','err');
+  if(!rateio.ativo && !loja) return showMsg('dMsg','Selecione a loja.','err');
   if(!conta) return showMsg('dMsg','Selecione a conta contábil.','err');
   if(!desc) return showMsg('dMsg','Informe a descrição da despesa.','err');
   if(!data) return showMsg('dMsg','Informe a data do lançamento.','err');
@@ -318,25 +497,42 @@ async function salvarDespesa(){
   if(!mes) return showMsg('dMsg','Informe o mês de apuração.','err');
   if(!(qtd>=1 && qtd<=60)) return showMsg('dMsg','O número de meses deve ser entre 1 e 60.','err');
 
+  let rr = null;
+  if(rateio.ativo){
+    rr = calcularRateioLojas(valor);
+    if(rr.erro) return showMsg('dMsg', rr.erro, 'err');
+  }
+
   const btn = $('btnSalvar'); btn.disabled = true; btn.textContent = 'Salvando…';
-  const { data: res, error } = await sb.rpc('despesas_loja_salvar', {
-    p_id: editando ? editando.id : null,
-    p_loja: loja, p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
+  const comum = {
+    p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
     p_data: data, p_valor_total: Math.round(valor*100)/100,
     p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null,
-  });
+  };
+  const { data: res, error } = rateio.ativo
+    ? await sb.rpc('despesas_loja_salvar_rateio', {
+        ...comum, p_lojas: rr.ls, p_modo: rateio.modo,
+        p_percentuais: rateio.modo === 'percentual' ? rr.pcts.map(p => Math.round(p*10000)/10000) : null,
+      })
+    : await sb.rpc('despesas_loja_salvar', { ...comum, p_id: editando ? editando.id : null, p_loja: loja });
   btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa';
 
   if(error) return showMsg('dMsg','Erro: '+error.message,'err');
-  const r = Array.isArray(res) ? res[0] : res;
+  const lista = Array.isArray(res) ? res : [res];
+  const r = lista[0];
   if(editando){
     editando = null;
     alert('Lançamento '+(r&&r.numero||'')+' atualizado.');
     mudarTab('lancamentos');
     return;
   }
-  showMsg('dMsg','Despesa '+(r&&r.numero||'')+' lançada: '+fmtMoeda(r&&r.valor_total)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
-  // limpa campos mantendo loja/conta/data para lançamentos em sequência
+  if(rateio.ativo){
+    const nums = lista.map(x => x.numero).sort();
+    showMsg('dMsg','Rateio lançado em '+lista.length+' lojas ('+nums[0]+' a '+nums[nums.length-1]+'), total '+fmtMoeda(valor)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
+  } else {
+    showMsg('dMsg','Despesa '+(r&&r.numero||'')+' lançada: '+fmtMoeda(r&&r.valor_total)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
+  }
+  // limpa campos mantendo loja/conta/data e a seleção do rateio para lançamentos em sequência
   $('dDesc').value=''; $('dForn').value=''; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
   atualizarPreview();
 }
@@ -427,18 +623,23 @@ function desenharLancamentos(){
       return '<tr class="clicavel" onclick="toggleDet(\''+d.id+'\')">'+
         '<td><b>'+esc(d.numero)+'</b></td>'+
         '<td>'+fmtData(d.data_lancamento)+'</td>'+
-        '<td>'+esc(d.loja)+'</td>'+
+        '<td>'+esc(d.loja)+(d.rateio_id ? '<br><span class="badge-rateio" title="Rateio de '+fmtMoeda(d.rateio_valor_total)+' entre '+d.rateio_qtd_lojas+' lojas">Rateio · '+fmtNum(d.rateio_percentual)+'%</span>' : '')+'</td>'+
         '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
         '<td>'+esc(d.descricao)+'</td>'+
         '<td>'+esc(d.fornecedor||'—')+'</td>'+
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
-        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()"><button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button></td>' : '')+
+        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+          (d.rateio_id
+            ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>'
+            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>')+
+          '</td>' : '')+
       '</tr>'+
       '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(souMaster?9:8)+'">'+
         '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
           ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
         '</div>'+
+        (d.rateio_id ? '<div class="hint" style="margin-bottom:4px">Parte de um rateio de <b>'+fmtMoeda(d.rateio_valor_total)+'</b> entre <b>'+d.rateio_qtd_lojas+' lojas</b> ('+(d.rateio_modo==='igual'?'por igual':'por percentual')+'). Esta loja: <b>'+fmtNum(d.rateio_percentual)+'%</b>.</div>' : '')+
         '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
       '</td></tr>';
     }).join('')+
@@ -451,6 +652,7 @@ function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.
 
 function editarDespesa(id){
   const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  if(d.rateio_id){ alert('Este lançamento faz parte de um rateio entre lojas. Para corrigir, exclua o rateio e lance novamente.'); return; }
   const ps = d.despesas_loja_parcelas||[];
   editando = { ...d, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7) };
   currentTab = 'nova';
@@ -467,6 +669,19 @@ async function excluirDespesa(id){
   carregarLancamentos();
 }
 
+async function excluirRateio(rateioId){
+  const { data: partes, error: e1 } = await sb.from('despesas_loja').select('numero, loja, valor_total, rateio_valor_total').eq('rateio_id', rateioId).order('numero');
+  if(e1){ alert('Erro: '+e1.message); return; }
+  const lista = partes || [];
+  const total = lista.length ? lista[0].rateio_valor_total : 0;
+  if(!confirm('Excluir o rateio inteiro ('+fmtMoeda(total)+') das '+lista.length+' lojas?\n\n'+
+    lista.map(p => p.numero+' · '+p.loja+' · '+fmtMoeda(p.valor_total)).join('\n')+
+    '\n\nTodas as parcelas serão apagadas. Essa ação não pode ser desfeita.')) return;
+  const { error } = await sb.from('despesas_loja').delete().eq('rateio_id', rateioId);
+  if(error){ alert('Erro ao excluir: '+error.message); return; }
+  carregarLancamentos();
+}
+
 function exportarLancamentos(){
   const lista = filtrarBusca(cacheLancamentos);
   if(!lista.length){ alert('Não há dados para exportar.'); return; }
@@ -476,6 +691,9 @@ function exportarLancamentos(){
       'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
       'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Valor total (R$)': Number(d.valor_total),
       'Parcelas': ps.length, 'Mês inicial': ps.length?fmtMes(ps[0].mes_apuracao):'', 'Mês final': ps.length?fmtMes(ps[ps.length-1].mes_apuracao):'',
+      'Rateio entre lojas': d.rateio_id ? 'Sim' : 'Não',
+      '% da loja no rateio': d.rateio_id ? Number(d.rateio_percentual) : '',
+      'Valor total do rateio (R$)': d.rateio_id ? Number(d.rateio_valor_total) : '',
       'Lançado por': d.registrado_por_nome||'', 'Observação': d.observacao||'',
     };
   });
