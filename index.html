@@ -155,7 +155,7 @@ let meuPerfil = null;
 let minhasLojas = [];
 let souMaster = false;
 let currentTab = 'nova';
-let editando = null;         // despesa em edição (master)
+let editando = null;         // despesa (ou rateio inteiro) em edição
 let cacheLancamentos = [];
 let cacheApuracao = null;
 
@@ -282,7 +282,10 @@ async function verificarAcessoEIniciar(){
 
 function mudarTab(tab){
   currentTab = tab;
-  if(tab !== 'nova') editando = null;
+  if(tab !== 'nova'){
+    if(editandoRateio()) rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
+    editando = null;
+  }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab===tab));
   renderTab();
 }
@@ -296,16 +299,21 @@ function renderTab(){
 // Estado do rateio entre lojas (só para lançamentos novos)
 let rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
 function podeRatear(){ return !editando && minhasLojas.length > 1; }
+function editandoRateio(){ return !!(editando && editando.rateio_id); }
 
 function renderNova(){
   const e = editando;
   const mesAtual = hojeISO().slice(0,7);
   const mesIni = e ? e._mesInicial : mesAtual;
-  if(!podeRatear()) rateio.ativo = false;
+  if(editandoRateio()) rateio.ativo = true;
+  else if(!podeRatear()) rateio.ativo = false;
   $('mainContent').innerHTML =
     '<div class="card">'+
-      '<h2>'+(e ? 'Editar lançamento '+esc(e.numero) : 'Nova despesa')+'</h2>'+
-      (e ? '<div class="edit-banner"><span>Você está editando um lançamento existente. As parcelas serão recalculadas ao salvar.</span><button class="lnk" onclick="cancelarEdicao()">Cancelar edição</button></div>' : '')+
+      '<h2>'+(e ? (e.rateio_id ? 'Editar rateio '+esc(e._numeros) : 'Editar lançamento '+esc(e.numero)) : 'Nova despesa')+'</h2>'+
+      (e ? '<div class="edit-banner"><span>'+(e.rateio_id
+          ? 'Você está editando um rateio entre lojas. Todos os campos podem ser alterados, inclusive lojas e percentuais; valores e parcelas de cada loja serão recalculados ao salvar.'
+          : 'Você está editando um lançamento existente. Todos os campos podem ser alterados; as parcelas serão recalculadas ao salvar.')+
+        '</span><button class="lnk" onclick="cancelarEdicao()">Cancelar edição</button></div>' : '')+
       '<div class="grid-form">'+
         (podeRatear()
           ? '<div class="field"><label>Destino da despesa</label><select class="inp" id="dDestino" onchange="onDestinoChange()">'+
@@ -313,12 +321,15 @@ function renderNova(){
               '<option value="rateio"'+(rateio.ativo?' selected':'')+'>Rateio entre lojas</option>'+
             '</select></div>'+
             '<div class="field" id="dLojaWrap"'+(rateio.ativo?' style="display:none"':'')+'><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(minhasLojas[0], false)+'</select></div>'
-          : '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>')+
+          : editandoRateio()
+            ? '<div class="field span2"><label>Destino da despesa</label><input class="inp" value="Rateio entre lojas" disabled></div>'
+            : '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>')+
         '<div class="field span2"><label>Conta contábil</label><select class="inp" id="dConta"><option value="">Selecione…</option>'+optsContas(e?e.conta_contabil:'', false)+'</select></div>'+
         '<div class="field span2"><label>Descrição</label><input class="inp" id="dDesc" maxlength="200" placeholder="Ex.: Manutenção do ar-condicionado" value="'+esc(e?e.descricao:'')+'"></div>'+
-        '<div class="field span2"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
+        '<div class="field"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
+        '<div class="field"><label>Nota fiscal (opcional)</label><input class="inp" id="dNF" maxlength="60" placeholder="Nº da NF" value="'+esc(e?e.nota_fiscal||'':'')+'"></div>'+
         '<div class="field"><label>Data do lançamento</label><input class="inp" type="date" id="dData" value="'+(e?e.data_lancamento:hojeISO())+'"></div>'+
-        '<div class="field"><label id="dValorLbl">'+(rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label id="dValorLbl">'+(rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.rateio_id?e.rateio_valor_total:e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
         '<div class="field"><label>Mês de apuração inicial</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
         '<div class="field"><label>Nº de meses (parcelas)</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:1)+'" oninput="atualizarPreview()"></div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
@@ -476,13 +487,17 @@ function atualizarPreview(){
     '<div class="chips">'+parcelas.map(p => '<span class="chip">'+p.numero+'/'+qtd+' · '+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+'</div>';
 }
 
-function cancelarEdicao(){ editando = null; mudarTab('lancamentos'); }
+function cancelarEdicao(){
+  if(editandoRateio()) rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
+  editando = null; mudarTab('lancamentos');
+}
 
 async function salvarDespesa(){
   const loja = $('dLoja') ? $('dLoja').value : '';
   const conta = $('dConta').value;
   const desc = $('dDesc').value.trim();
   const forn = $('dForn').value.trim();
+  const nf = $('dNF').value.trim();
   const data = $('dData').value;
   const valor = parseNumBR($('dValor').value);
   const mes = $('dMes').value;
@@ -507,12 +522,13 @@ async function salvarDespesa(){
   const comum = {
     p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
     p_data: data, p_valor_total: Math.round(valor*100)/100,
-    p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null,
+    p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null, p_nota_fiscal: nf || null,
   };
   const { data: res, error } = rateio.ativo
     ? await sb.rpc('despesas_loja_salvar_rateio', {
         ...comum, p_lojas: rr.ls, p_modo: rateio.modo,
         p_percentuais: rateio.modo === 'percentual' ? rr.pcts.map(p => Math.round(p*10000)/10000) : null,
+        p_rateio_id: editandoRateio() ? editando.rateio_id : null,
       })
     : await sb.rpc('despesas_loja_salvar', { ...comum, p_id: editando ? editando.id : null, p_loja: loja });
   btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa';
@@ -521,8 +537,10 @@ async function salvarDespesa(){
   const lista = Array.isArray(res) ? res : [res];
   const r = lista[0];
   if(editando){
+    const eraRateio = editandoRateio();
     editando = null;
-    alert('Lançamento '+(r&&r.numero||'')+' atualizado.');
+    if(eraRateio){ rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} }; }
+    alert(eraRateio ? 'Rateio atualizado ('+lista.length+' lojas, total '+fmtMoeda(valor)+').' : 'Lançamento '+(r&&r.numero||'')+' atualizado.');
     mudarTab('lancamentos');
     return;
   }
@@ -533,7 +551,7 @@ async function salvarDespesa(){
     showMsg('dMsg','Despesa '+(r&&r.numero||'')+' lançada: '+fmtMoeda(r&&r.valor_total)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
   }
   // limpa campos mantendo loja/conta/data e a seleção do rateio para lançamentos em sequência
-  $('dDesc').value=''; $('dForn').value=''; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
+  $('dDesc').value=''; $('dForn').value=''; $('dNF').value=''; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
   atualizarPreview();
 }
 
@@ -548,7 +566,7 @@ function renderLancamentos(){
         '<div class="field" style="min-width:210px"><label>Conta contábil</label><select class="inp" id="fConta" onchange="carregarLancamentos()">'+optsContas('', true)+'</select></div>'+
         '<div class="field"><label>Filtrar por</label><select class="inp" id="fTipo" onchange="carregarLancamentos()"><option value="lanc">Mês do lançamento</option><option value="apur">Mês de apuração</option></select></div>'+
         '<div class="field"><label>Mês</label><input class="inp" type="month" id="fMes" value="'+mesAtual+'" onchange="carregarLancamentos()"></div>'+
-        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, nº…" oninput="desenharLancamentos()"></div>'+
+        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, NF, nº…" oninput="desenharLancamentos()"></div>'+
         '<button class="btn btn-outline btn-sm" onclick="exportarLancamentos()">⬇ Excel</button>'+
       '</div>'+
       '<div id="lancConteudo" class="loading">Carregando…</div>'+
@@ -593,7 +611,7 @@ async function carregarLancamentos(){
 function filtrarBusca(lista){
   const b = ($('fBusca') && $('fBusca').value || '').trim().toLowerCase();
   if(!b) return lista;
-  return lista.filter(d => [d.numero,d.descricao,d.fornecedor,d.observacao,d.registrado_por_nome].some(x => (x||'').toLowerCase().includes(b)));
+  return lista.filter(d => [d.numero,d.descricao,d.fornecedor,d.nota_fiscal,d.observacao,d.registrado_por_nome].some(x => (x||'').toLowerCase().includes(b)));
 }
 
 function desenharLancamentos(){
@@ -615,7 +633,7 @@ function desenharLancamentos(){
       (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
     '</div>'+
     '<div class="table-wrap"><table><thead><tr>'+
-      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(souMaster?'<th></th>':'')+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th>NF</th><th class="r">Valor total</th><th>Apuração</th><th></th>'+
     '</tr></thead><tbody>'+
     lista.map(d => {
       const ps = d.despesas_loja_parcelas||[];
@@ -627,34 +645,61 @@ function desenharLancamentos(){
         '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
         '<td>'+esc(d.descricao)+'</td>'+
         '<td>'+esc(d.fornecedor||'—')+'</td>'+
+        '<td style="white-space:nowrap">'+esc(d.nota_fiscal||'—')+'</td>'+
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
-        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+        '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
           (d.rateio_id
-            ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>'
-            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>')+
-          '</td>' : '')+
+            ? '<button class="lnk" onclick="editarRateio(\''+d.rateio_id+'\')">Editar rateio</button>'+(souMaster?' · <button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>':'')
+            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster?' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>':''))+
+          '</td>'+
       '</tr>'+
-      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(souMaster?9:8)+'">'+
+      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="10">'+
         '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
           ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
         '</div>'+
         (d.rateio_id ? '<div class="hint" style="margin-bottom:4px">Parte de um rateio de <b>'+fmtMoeda(d.rateio_valor_total)+'</b> entre <b>'+d.rateio_qtd_lojas+' lojas</b> ('+(d.rateio_modo==='igual'?'por igual':'por percentual')+'). Esta loja: <b>'+fmtNum(d.rateio_percentual)+'%</b>.</div>' : '')+
-        '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
+        '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+
+          (d.atualizado_por_nome ? ' · Editado por '+esc(d.atualizado_por_nome)+' em '+new Date(d.atualizado_em).toLocaleString('pt-BR') : '')+
+          (d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
       '</td></tr>';
     }).join('')+
-    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(souMaster?2:1)+'"></td></tr>'+
+    '<tr class="total-row"><td colspan="7">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="2"></td></tr>'+
     '</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
+    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+'Qualquer informação pode ser editada após o lançamento. '+(souMaster?'A exclusão é exclusiva do master.':'Para excluir um lançamento, fale com o master.')+'</p>';
 }
 
 function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
 
 function editarDespesa(id){
   const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
-  if(d.rateio_id){ alert('Este lançamento faz parte de um rateio entre lojas. Para corrigir, exclua o rateio e lance novamente.'); return; }
+  if(d.rateio_id) return editarRateio(d.rateio_id);
   const ps = d.despesas_loja_parcelas||[];
   editando = { ...d, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7) };
+  currentTab = 'nova';
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='nova'));
+  renderNova();
+  window.scrollTo(0,0);
+}
+
+function fmtPct(v){ return (Number(v)||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:4 }); }
+
+// Carrega todas as lojas do rateio (a lista pode estar filtrada por loja) e abre o formulário em modo rateio
+async function editarRateio(rateioId){
+  const { data: partes, error } = await sb.from('despesas_loja')
+    .select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)')
+    .eq('rateio_id', rateioId).order('numero');
+  if(error){ alert('Erro: '+error.message); return; }
+  if(!partes || !partes.length){ alert('Rateio não encontrado.'); return; }
+  const fora = partes.filter(p => !minhasLojas.includes(p.loja)).map(p => p.loja);
+  if(fora.length || partes.length < partes[0].rateio_qtd_lojas){ alert('Este rateio inclui loja(s) às quais você não tem acesso. Fale com o master.'); return; }
+  const p0 = partes[0];
+  const ps = (p0.despesas_loja_parcelas||[]).sort((a,b)=>a.numero_parcela-b.numero_parcela);
+  const nums = partes.map(p => p.numero);
+  editando = { ...p0, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7),
+               _numeros: nums.length > 1 ? nums[0]+' a '+nums[nums.length-1] : nums[0] };
+  rateio = { ativo:true, modo:p0.rateio_modo || 'igual', lojas:new Set(partes.map(p => p.loja)), pcts:{} };
+  partes.forEach(p => rateio.pcts[p.loja] = fmtPct(p.rateio_percentual));
   currentTab = 'nova';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='nova'));
   renderNova();
@@ -689,17 +734,17 @@ function exportarLancamentos(){
     const ps = d.despesas_loja_parcelas||[];
     return {
       'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
-      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Valor total (R$)': Number(d.valor_total),
+      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Nota fiscal': d.nota_fiscal||'', 'Valor total (R$)': Number(d.valor_total),
       'Parcelas': ps.length, 'Mês inicial': ps.length?fmtMes(ps[0].mes_apuracao):'', 'Mês final': ps.length?fmtMes(ps[ps.length-1].mes_apuracao):'',
       'Rateio entre lojas': d.rateio_id ? 'Sim' : 'Não',
       '% da loja no rateio': d.rateio_id ? Number(d.rateio_percentual) : '',
       'Valor total do rateio (R$)': d.rateio_id ? Number(d.rateio_valor_total) : '',
-      'Lançado por': d.registrado_por_nome||'', 'Observação': d.observacao||'',
+      'Lançado por': d.registrado_por_nome||'', 'Editado por': d.atualizado_por_nome||'', 'Observação': d.observacao||'',
     };
   });
   const parcelas = [];
   lista.forEach(d => (d.despesas_loja_parcelas||[]).forEach(p => parcelas.push({
-    'Nº': d.numero, 'Loja': d.loja, 'Conta contábil': d.conta_contabil, 'Descrição': d.descricao,
+    'Nº': d.numero, 'Loja': d.loja, 'Conta contábil': d.conta_contabil, 'Descrição': d.descricao, 'Nota fiscal': d.nota_fiscal||'',
     'Parcela': p.numero_parcela+'/'+d.despesas_loja_parcelas.length, 'Mês de apuração': fmtMes(p.mes_apuracao), 'Valor (R$)': Number(p.valor),
   })));
   const wb = XLSX.utils.book_new();
