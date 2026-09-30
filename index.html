@@ -154,6 +154,8 @@ const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out'
 let meuPerfil = null;
 let minhasLojas = [];
 let souMaster = false;
+let podeEditar = false;      // master ou usuários autorizados a editar lançamentos
+const EDITORES_EXTRA = ['4e2db9bf-4dc2-475e-bfec-4a82e7ae2798']; // Jussara Silva
 let currentTab = 'nova';
 let editando = null;         // despesa em edição (master)
 let cacheLancamentos = [];
@@ -254,6 +256,7 @@ async function verificarAcessoEIniciar(){
   if(!perfil) return irParaLogin();
   meuPerfil = perfil;
   souMaster = perfil.tipo === 'master';
+  podeEditar = souMaster || EDITORES_EXTRA.includes(perfil.id);
 
   // Se a pessoa sair do Sistema Luna (nesta ou em outra aba) ou a sessão expirar, volta para o login
   sb.auth.onAuthStateChange((evento, sessao) => {
@@ -615,7 +618,7 @@ function desenharLancamentos(){
       (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
     '</div>'+
     '<div class="table-wrap"><table><thead><tr>'+
-      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(souMaster?'<th></th>':'')+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(podeEditar?'<th></th>':'')+
     '</tr></thead><tbody>'+
     lista.map(d => {
       const ps = d.despesas_loja_parcelas||[];
@@ -629,13 +632,13 @@ function desenharLancamentos(){
         '<td>'+esc(d.fornecedor||'—')+'</td>'+
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
-        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+        (podeEditar ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
           (d.rateio_id
-            ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>'
-            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>')+
+            ? (souMaster ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
+            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
           '</td>' : '')+
       '</tr>'+
-      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(souMaster?9:8)+'">'+
+      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(podeEditar?9:8)+'">'+
         '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
           ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
         '</div>'+
@@ -643,9 +646,9 @@ function desenharLancamentos(){
         '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
       '</td></tr>';
     }).join('')+
-    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(souMaster?2:1)+'"></td></tr>'+
+    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(podeEditar?2:1)+'"></td></tr>'+
     '</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
+    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':podeEditar?'Você pode editar lançamentos; a exclusão é exclusiva do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
 }
 
 function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
