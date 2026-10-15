@@ -630,6 +630,7 @@ function desenharLancamentos(){
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
         (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+          '<button class="lnk" onclick="alterarConta(\''+d.id+'\')">Alterar conta</button> · '+
           (d.rateio_id
             ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>'
             : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>')+
@@ -659,6 +660,34 @@ function editarDespesa(id){
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='nova'));
   renderNova();
   window.scrollTo(0,0);
+}
+
+function alterarConta(id){
+  const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  const m = $('modalConta'); if(m) m.remove();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="modalConta" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50">'+
+      '<div class="card" style="max-width:420px;width:92%;margin:0">'+
+        '<h2>Alterar conta contábil · '+esc(d.numero)+'</h2>'+
+        '<p class="hint" style="margin-bottom:10px">'+esc(d.descricao)+(d.rateio_id?'<br><b>Rateio:</b> a nova conta será aplicada às '+d.rateio_qtd_lojas+' lojas do rateio.':'')+'</p>'+
+        '<div class="field"><label>Conta contábil</label><select class="inp" id="novaConta">'+optsContas(d.conta_contabil,false)+'</select></div>'+
+        '<div class="msg" id="contaMsg"></div>'+
+        '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="btnConta" onclick="salvarConta(\''+id+'\')">Salvar</button>'+
+        '<button class="btn" style="background:#888" onclick="$(\'modalConta\').remove()">Cancelar</button></div>'+
+      '</div></div>');
+}
+
+async function salvarConta(id){
+  const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  const conta = $('novaConta').value;
+  if(conta === d.conta_contabil){ $('modalConta').remove(); return; }
+  const btn = $('btnConta'); btn.disabled = true; btn.textContent = 'Salvando…';
+  let q = sb.from('despesas_loja').update({ conta_contabil: conta });
+  q = d.rateio_id ? q.eq('rateio_id', d.rateio_id) : q.eq('id', id);
+  const { error } = await q;
+  if(error){ btn.disabled = false; btn.textContent = 'Salvar'; return showMsg('contaMsg','Erro: '+error.message,'err'); }
+  $('modalConta').remove();
+  carregarLancamentos();
 }
 
 async function excluirDespesa(id){
