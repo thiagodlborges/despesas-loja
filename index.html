@@ -154,6 +154,7 @@ const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out'
 let meuPerfil = null;
 let minhasLojas = [];
 let souMaster = false;
+let podeEditar = false; // master ou editor liberado (perfis.despesas_loja_editor)
 let currentTab = 'nova';
 let editando = null;         // despesa em edição (master)
 let cacheLancamentos = [];
@@ -254,6 +255,7 @@ async function verificarAcessoEIniciar(){
   if(!perfil) return irParaLogin();
   meuPerfil = perfil;
   souMaster = perfil.tipo === 'master';
+  podeEditar = souMaster || !!perfil.despesas_loja_editor;
 
   // Se a pessoa sair do Sistema Luna (nesta ou em outra aba) ou a sessão expirar, volta para o login
   sb.auth.onAuthStateChange((evento, sessao) => {
@@ -295,7 +297,50 @@ function renderTab(){
 // ── NOVA DESPESA ──────────────────────────────────────────
 // Estado do rateio entre lojas (só para lançamentos novos)
 let rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
-function podeRatear(){ return !editando && minhasLojas.length > 1; }
+// Despesa mensal (recorrente): replicada em todos os meses da previsão, com reajustes programados
+let mensal = { ativo:false, reaj:[] };   // reaj: [{mes:'YYYY-MM', tipo:'percentual'|'valor', valor:'', anual:bool}]
+function podeRatear(){ return !editando && !mensal.ativo && minhasLojas.length > 1; }
+
+function reajustesValidos(){
+  return mensal.reaj.map(x => ({ mes:x.mes, tipo:x.tipo, valor:parseNumBR(String(x.valor)), anual: x.tipo==='percentual' && !!x.anual }))
+    .filter(x => x.mes && x.valor>0).sort((a,b)=>a.mes.localeCompare(b.mes));
+}
+function calcularMensal(valor, mesIni, qtd, reaj){
+  const out = []; let cur = Math.round(valor*100)/100;
+  for(let i=0;i<qtd;i++){
+    const mes = addMeses(mesIni, i);
+    if(i>0) for(const x of reaj){
+      if(mes===x.mes || (x.tipo==='percentual' && x.anual && mes>x.mes && mes.slice(5)===x.mes.slice(5)))
+        cur = x.tipo==='percentual' ? Math.round(cur*(1+x.valor/100)*100)/100 : Math.round(x.valor*100)/100;
+    }
+    out.push({ mes, valor:cur });
+  }
+  return out;
+}
+function onTipoDespesa(v){
+  mensal.ativo = v === 'mensal';
+  if(mensal.ativo){ rateio.ativo = false; if(!mensal.reaj.length) mensal.reaj = []; }
+  renderNova();
+}
+function addReaj(){ mensal.reaj.push({ mes:'', tipo:'percentual', valor:'', anual:true }); renderReajustes(); atualizarPreview(); }
+function delReaj(i){ mensal.reaj.splice(i,1); renderReajustes(); atualizarPreview(); }
+function setReaj(i, campo, v){ mensal.reaj[i][campo] = v; if(campo==='tipo') renderReajustes(); atualizarPreview(); }
+function renderReajustes(){
+  const box = $('dReajBox'); if(!box) return;
+  box.innerHTML =
+    '<div class="hint" style="margin:10px 0 6px"><b>Reajustes</b> (opcional): informe o mês em que o valor muda. Com “repetir todo ano”, o mesmo percentual é aplicado de novo a cada ano, então basta cadastrar uma vez.</div>'+
+    mensal.reaj.map((x,i) =>
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px">'+
+        '<input class="inp" type="month" value="'+esc(x.mes)+'" onchange="setReaj('+i+',\'mes\',this.value)" title="Mês em que vale o reajuste">'+
+        '<select class="inp" style="width:auto" onchange="setReaj('+i+',\'tipo\',this.value)">'+
+          '<option value="percentual"'+(x.tipo==='percentual'?' selected':'')+'>Percentual (%)</option>'+
+          '<option value="valor"'+(x.tipo==='valor'?' selected':'')+'>Novo valor mensal (R$)</option></select>'+
+        '<input class="inp num" style="width:110px" inputmode="decimal" placeholder="0,00" value="'+esc(x.valor)+'" oninput="setReaj('+i+',\'valor\',this.value)">'+
+        (x.tipo==='percentual' ? '<label style="font-size:13px"><input type="checkbox"'+(x.anual?' checked':'')+' onchange="setReaj('+i+',\'anual\',this.checked)"> repetir todo ano</label>' : '')+
+        '<button class="lnk danger" type="button" onclick="delReaj('+i+')">Remover</button>'+
+      '</div>').join('')+
+    '<button class="lnk" type="button" onclick="addReaj()">+ Adicionar reajuste</button>';
+}
 
 function renderNova(){
   const e = editando;
@@ -307,6 +352,9 @@ function renderNova(){
       '<h2>'+(e ? 'Editar lançamento '+esc(e.numero) : 'Nova despesa')+'</h2>'+
       (e ? '<div class="edit-banner"><span>Você está editando um lançamento existente. As parcelas serão recalculadas ao salvar.</span><button class="lnk" onclick="cancelarEdicao()">Cancelar edição</button></div>' : '')+
       '<div class="grid-form">'+
+        (!e ? '<div class="field span2"><label>Tipo de despesa</label><select class="inp" id="dTipo" onchange="onTipoDespesa(this.value)">'+
+              '<option value="unica"'+(mensal.ativo?'':' selected')+'>Única ou parcelada</option>'+
+              '<option value="mensal"'+(mensal.ativo?' selected':'')+'>Mensal (recorrente)</option></select></div>' : '')+
         (podeRatear()
           ? '<div class="field"><label>Destino da despesa</label><select class="inp" id="dDestino" onchange="onDestinoChange()">'+
               '<option value="loja"'+(rateio.ativo?'':' selected')+'>Uma loja</option>'+
@@ -318,17 +366,19 @@ function renderNova(){
         '<div class="field span2"><label>Descrição</label><input class="inp" id="dDesc" maxlength="200" placeholder="Ex.: Manutenção do ar-condicionado" value="'+esc(e?e.descricao:'')+'"></div>'+
         '<div class="field span2"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
         '<div class="field"><label>Data do lançamento</label><input class="inp" type="date" id="dData" value="'+(e?e.data_lancamento:hojeISO())+'"></div>'+
-        '<div class="field"><label id="dValorLbl">'+(rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
-        '<div class="field"><label>Mês de apuração inicial</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
-        '<div class="field"><label>Nº de meses (parcelas)</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:1)+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label id="dValorLbl">'+(mensal.ativo?'Valor mensal (R$)':rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(mensal.ativo?e.valor_mensal:e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label>'+(mensal.ativo?'Primeiro mês':'Mês de apuração inicial')+'</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
+        '<div class="field"><label>'+(mensal.ativo?'Meses de previsão (máx. 60)':'Nº de meses (parcelas)')+'</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:(mensal.ativo?60:1))+'" oninput="atualizarPreview()"></div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
       '</div>'+
+      (mensal.ativo ? '<div id="dReajBox"></div>' : '')+
       '<div id="dRateioBox"></div>'+
       '<div class="preview" id="dPreview"></div>'+
       '<div class="msg" id="dMsg"></div>'+
       '<button class="btn" id="btnSalvar" onclick="salvarDespesa()">'+(e?'Salvar alterações':'Lançar despesa')+'</button>'+
     '</div>';
   renderRateioBox();
+  renderReajustes();
   atualizarPreview();
 }
 
@@ -446,6 +496,17 @@ function atualizarPreview(){
   }
   if(qtd > 60){ box.innerHTML = '<span class="hint" style="color:#B43C3C">Máximo de 60 meses.</span>'; return; }
 
+  if(mensal.ativo){
+    const ps = calcularMensal(valor, mes, qtd, reajustesValidos());
+    const total = ps.reduce((a,p)=>a+p.valor,0);
+    const mudancas = ps.filter((p,i)=> i>0 && p.valor!==ps[i-1].valor);
+    box.innerHTML =
+      '<div class="hint" style="margin-bottom:8px">Despesa mensal replicada em <b>'+qtd+' meses</b> ('+fmtMes(ps[0].mes)+' a '+fmtMes(ps[qtd-1].mes)+'), total previsto <b>'+fmtMoeda(total)+'</b>.'+
+        (mudancas.length ? ' Mudanças de valor: '+mudancas.map(p=>fmtMes(p.mes)+' → <b>'+fmtMoeda(p.valor)+'</b>').join(', ')+'.' : '')+'</div>'+
+      '<div class="chips">'+ps.slice(0,12).map((p,i) => '<span class="chip">'+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+(qtd>12?'<span class="chip">… +'+(qtd-12)+' meses</span>':'')+'</div>';
+    return;
+  }
+
   if(rateio.ativo){
     const r = calcularRateioLojas(valor);
     if(r.erro){ box.innerHTML = '<span class="hint" style="color:#B43C3C">'+esc(r.erro)+'</span>'; return; }
@@ -476,7 +537,7 @@ function atualizarPreview(){
     '<div class="chips">'+parcelas.map(p => '<span class="chip">'+p.numero+'/'+qtd+' · '+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+'</div>';
 }
 
-function cancelarEdicao(){ editando = null; mudarTab('lancamentos'); }
+function cancelarEdicao(){ editando = null; mensal = { ativo:false, reaj:[] }; mudarTab('lancamentos'); }
 
 async function salvarDespesa(){
   const loja = $('dLoja') ? $('dLoja').value : '';
@@ -497,6 +558,14 @@ async function salvarDespesa(){
   if(!mes) return showMsg('dMsg','Informe o mês de apuração.','err');
   if(!(qtd>=1 && qtd<=60)) return showMsg('dMsg','O número de meses deve ser entre 1 e 60.','err');
 
+  let reajEnv = [];
+  if(mensal.ativo){
+    for(const x of mensal.reaj){
+      if(!x.mes || !(parseNumBR(String(x.valor))>0)) return showMsg('dMsg','Preencha mês e valor de cada reajuste (ou remova a linha).','err');
+      if(x.mes <= mes) return showMsg('dMsg','Cada reajuste deve ser de um mês posterior ao primeiro mês.','err');
+    }
+    reajEnv = reajustesValidos();
+  }
   let rr = null;
   if(rateio.ativo){
     rr = calcularRateioLojas(valor);
@@ -509,7 +578,13 @@ async function salvarDespesa(){
     p_data: data, p_valor_total: Math.round(valor*100)/100,
     p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null,
   };
-  const { data: res, error } = rateio.ativo
+  const { data: res, error } = mensal.ativo
+    ? await sb.rpc('despesas_loja_salvar_mensal', {
+        p_id: editando ? editando.id : null, p_loja: loja, p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
+        p_data: data, p_valor_mensal: Math.round(valor*100)/100, p_mes_inicial: mes+'-01', p_qtd_meses: qtd,
+        p_observacao: obs || null, p_reajustes: reajEnv,
+      })
+    : rateio.ativo
     ? await sb.rpc('despesas_loja_salvar_rateio', {
         ...comum, p_lojas: rr.ls, p_modo: rateio.modo,
         p_percentuais: rateio.modo === 'percentual' ? rr.pcts.map(p => Math.round(p*10000)/10000) : null,
@@ -521,12 +596,14 @@ async function salvarDespesa(){
   const lista = Array.isArray(res) ? res : [res];
   const r = lista[0];
   if(editando){
-    editando = null;
+    editando = null; mensal = { ativo:false, reaj:[] };
     alert('Lançamento '+(r&&r.numero||'')+' atualizado.');
     mudarTab('lancamentos');
     return;
   }
-  if(rateio.ativo){
+  if(mensal.ativo){
+    showMsg('dMsg','Despesa mensal '+(r&&r.numero||'')+' lançada: '+qtd+' meses, total previsto '+fmtMoeda(r&&r.valor_total)+'.','ok');
+  } else if(rateio.ativo){
     const nums = lista.map(x => x.numero).sort();
     showMsg('dMsg','Rateio lançado em '+lista.length+' lojas ('+nums[0]+' a '+nums[nums.length-1]+'), total '+fmtMoeda(valor)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
   } else {
@@ -615,7 +692,7 @@ function desenharLancamentos(){
       (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
     '</div>'+
     '<div class="table-wrap"><table><thead><tr>'+
-      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(souMaster?'<th></th>':'')+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(podeEditar?'<th></th>':'')+
     '</tr></thead><tbody>'+
     lista.map(d => {
       const ps = d.despesas_loja_parcelas||[];
@@ -625,17 +702,18 @@ function desenharLancamentos(){
         '<td>'+fmtData(d.data_lancamento)+'</td>'+
         '<td>'+esc(d.loja)+(d.rateio_id ? '<br><span class="badge-rateio" title="Rateio de '+fmtMoeda(d.rateio_valor_total)+' entre '+d.rateio_qtd_lojas+' lojas">Rateio · '+fmtNum(d.rateio_percentual)+'%</span>' : '')+'</td>'+
         '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
-        '<td>'+esc(d.descricao)+'</td>'+
+        '<td>'+esc(d.descricao)+(d.mensal ? ' <span class="badge" title="Despesa mensal recorrente">Mensal · '+fmtMoeda(d.valor_mensal)+'</span>' : '')+'</td>'+
         '<td>'+esc(d.fornecedor||'—')+'</td>'+
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
-        (souMaster ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+        (podeEditar ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
+          '<button class="lnk" onclick="alterarConta(\''+d.id+'\')">Alterar conta</button>'+(d.rateio_id && !souMaster ? '' : ' · ')+
           (d.rateio_id
-            ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>'
-            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button> · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>')+
+            ? (souMaster ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
+            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
           '</td>' : '')+
       '</tr>'+
-      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(souMaster?9:8)+'">'+
+      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(podeEditar?9:8)+'">'+
         '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
           ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
         '</div>'+
@@ -643,9 +721,9 @@ function desenharLancamentos(){
         '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
       '</td></tr>';
     }).join('')+
-    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(souMaster?2:1)+'"></td></tr>'+
+    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(podeEditar?2:1)+'"></td></tr>'+
     '</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
+    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':podeEditar?'Você pode editar lançamentos; a exclusão é exclusiva do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
 }
 
 function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
@@ -654,11 +732,38 @@ function editarDespesa(id){
   const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
   if(d.rateio_id){ alert('Este lançamento faz parte de um rateio entre lojas. Para corrigir, exclua o rateio e lance novamente.'); return; }
   const ps = d.despesas_loja_parcelas||[];
+  mensal = d.mensal ? { ativo:true, reaj:(d.reajustes||[]).map(x => ({ mes:x.mes, tipo:x.tipo, valor:fmtNum(x.valor), anual:!!x.anual })) } : { ativo:false, reaj:[] };
   editando = { ...d, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7) };
   currentTab = 'nova';
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab==='nova'));
   renderNova();
   window.scrollTo(0,0);
+}
+
+function alterarConta(id){
+  const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  const m = $('modalConta'); if(m) m.remove();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="modalConta" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50">'+
+      '<div class="card" style="max-width:420px;width:92%;margin:0">'+
+        '<h2>Alterar conta contábil · '+esc(d.numero)+'</h2>'+
+        '<p class="hint" style="margin-bottom:10px">'+esc(d.descricao)+(d.rateio_id?'<br><b>Rateio:</b> a nova conta será aplicada às '+d.rateio_qtd_lojas+' lojas do rateio.':'')+'</p>'+
+        '<div class="field"><label>Conta contábil</label><select class="inp" id="novaConta">'+optsContas(d.conta_contabil,false)+'</select></div>'+
+        '<div class="msg" id="contaMsg"></div>'+
+        '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="btnConta" onclick="salvarConta(\''+id+'\')">Salvar</button>'+
+        '<button class="btn" style="background:#888" onclick="$(\'modalConta\').remove()">Cancelar</button></div>'+
+      '</div></div>');
+}
+
+async function salvarConta(id){
+  const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
+  const conta = $('novaConta').value;
+  if(conta === d.conta_contabil){ $('modalConta').remove(); return; }
+  const btn = $('btnConta'); btn.disabled = true; btn.textContent = 'Salvando…';
+  const { error } = await sb.rpc('despesas_loja_alterar_conta', { p_id: id, p_conta: conta });
+  if(error){ btn.disabled = false; btn.textContent = 'Salvar'; return showMsg('contaMsg','Erro: '+error.message,'err'); }
+  $('modalConta').remove();
+  carregarLancamentos();
 }
 
 async function excluirDespesa(id){
