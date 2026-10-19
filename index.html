@@ -299,7 +299,7 @@ function renderTab(){
 let rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
 // Despesa mensal (recorrente): replicada em todos os meses da previsão, com reajustes programados
 let mensal = { ativo:false, reaj:[] };   // reaj: [{mes:'YYYY-MM', tipo:'percentual'|'valor', valor:'', anual:bool}]
-function podeRatear(){ return !editando && !mensal.ativo && minhasLojas.length > 1; }
+function podeRatear(){ return (!editando || !!editando.rateio_id) && !mensal.ativo && minhasLojas.length > 1; }
 
 function reajustesValidos(){
   return mensal.reaj.map(x => ({ mes:x.mes, tipo:x.tipo, valor:parseNumBR(String(x.valor)), anual: x.tipo==='percentual' && !!x.anual }))
@@ -356,19 +356,21 @@ function renderNova(){
               '<option value="unica"'+(mensal.ativo?'':' selected')+'>Única ou parcelada</option>'+
               '<option value="mensal"'+(mensal.ativo?' selected':'')+'>Mensal (recorrente)</option></select></div>' : '')+
         (podeRatear()
-          ? '<div class="field"><label>Destino da despesa</label><select class="inp" id="dDestino" onchange="onDestinoChange()">'+
+          ? (e ? '<div class="field span2"><label>Destino da despesa</label><div class="hint" style="padding:8px 0">Rateio entre lojas (altere as lojas e os percentuais abaixo)</div></div>' :
+            '<div class="field"><label>Destino da despesa</label><select class="inp" id="dDestino" onchange="onDestinoChange()">'+
               '<option value="loja"'+(rateio.ativo?'':' selected')+'>Uma loja</option>'+
               '<option value="rateio"'+(rateio.ativo?' selected':'')+'>Rateio entre lojas</option>'+
             '</select></div>'+
-            '<div class="field" id="dLojaWrap"'+(rateio.ativo?' style="display:none"':'')+'><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(minhasLojas[0], false)+'</select></div>'
+            '<div class="field" id="dLojaWrap"'+(rateio.ativo?' style="display:none"':'')+'><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(minhasLojas[0], false)+'</select></div>')
           : '<div class="field span2"><label>Loja</label><select class="inp" id="dLoja">'+optsLojas(e?e.loja:minhasLojas[0], false)+'</select></div>')+
         '<div class="field span2"><label>Conta contábil</label><select class="inp" id="dConta"><option value="">Selecione…</option>'+optsContas(e?e.conta_contabil:'', false)+'</select></div>'+
         '<div class="field span2"><label>Descrição</label><input class="inp" id="dDesc" maxlength="200" placeholder="Ex.: Manutenção do ar-condicionado" value="'+esc(e?e.descricao:'')+'"></div>'+
         '<div class="field span2"><label>Fornecedor (opcional)</label><input class="inp" id="dForn" maxlength="120" value="'+esc(e?e.fornecedor||'':'')+'"></div>'+
         '<div class="field"><label>Data do lançamento</label><input class="inp" type="date" id="dData" value="'+(e?e.data_lancamento:hojeISO())+'"></div>'+
-        '<div class="field"><label id="dValorLbl">'+(mensal.ativo?'Valor mensal (R$)':rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(mensal.ativo?e.valor_mensal:e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label id="dValorLbl">'+(mensal.ativo?'Valor mensal (R$)':rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(mensal.ativo?e.valor_mensal:e.rateio_id?e.rateio_valor_total:e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
         '<div class="field"><label>'+(mensal.ativo?'Primeiro mês':'Mês de apuração inicial')+'</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
-        '<div class="field"><label>'+(mensal.ativo?'Meses de previsão (máx. 60)':'Nº de meses (parcelas)')+'</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:(mensal.ativo?60:1))+'" oninput="atualizarPreview()"></div>'+
+        '<div class="field"><label>'+(mensal.ativo?'Meses de previsão (máx. 60)':'Nº de meses (parcelas)')+'</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:(mensal.ativo?60:1))+'" oninput="atualizarPreview()">'+
+          (e ? '<button class="lnk" type="button" style="margin-top:4px" onclick="dividir12()">Dividir em 12 meses</button>' : '')+'</div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
       '</div>'+
       (mensal.ativo ? '<div id="dReajBox"></div>' : '')+
@@ -381,6 +383,8 @@ function renderNova(){
   renderReajustes();
   atualizarPreview();
 }
+
+function dividir12(){ $('dQtd').value = 12; atualizarPreview(); }
 
 function onDestinoChange(){
   rateio.ativo = $('dDestino').value === 'rateio';
@@ -586,7 +590,7 @@ async function salvarDespesa(){
       })
     : rateio.ativo
     ? await sb.rpc('despesas_loja_salvar_rateio', {
-        ...comum, p_lojas: rr.ls, p_modo: rateio.modo,
+        ...comum, p_rateio_id: editando && editando.rateio_id ? editando.rateio_id : null, p_lojas: rr.ls, p_modo: rateio.modo,
         p_percentuais: rateio.modo === 'percentual' ? rr.pcts.map(p => Math.round(p*10000)/10000) : null,
       })
     : await sb.rpc('despesas_loja_salvar', { ...comum, p_id: editando ? editando.id : null, p_loja: loja });
@@ -707,9 +711,9 @@ function desenharLancamentos(){
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
         (podeEditar ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
-          '<button class="lnk" onclick="alterarConta(\''+d.id+'\')">Alterar conta</button>'+(d.rateio_id && !souMaster ? '' : ' · ')+
+          '<button class="lnk" onclick="alterarConta(\''+d.id+'\')">Alterar conta</button> · '+
           (d.rateio_id
-            ? (souMaster ? '<button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
+            ? '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar rateio</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
             : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
           '</td>' : '')+
       '</tr>'+
@@ -728,9 +732,15 @@ function desenharLancamentos(){
 
 function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
 
-function editarDespesa(id){
+async function editarDespesa(id){
   const d = cacheLancamentos.find(x=>x.id===id); if(!d) return;
-  if(d.rateio_id){ alert('Este lançamento faz parte de um rateio entre lojas. Para corrigir, exclua o rateio e lance novamente.'); return; }
+  if(d.rateio_id){
+    const { data: partes, error } = await sb.from('despesas_loja').select('loja, rateio_percentual, rateio_qtd_lojas').eq('rateio_id', d.rateio_id);
+    if(error){ alert('Erro: '+error.message); return; }
+    if(!partes || partes.length !== d.rateio_qtd_lojas){ alert('Você não tem acesso a todas as lojas deste rateio, então não pode editá-lo.'); return; }
+    rateio = { ativo:true, modo:d.rateio_modo === 'percentual' ? 'percentual' : 'igual', lojas:new Set(partes.map(x => x.loja)), pcts:{} };
+    partes.forEach(x => rateio.pcts[x.loja] = fmtNum(x.rateio_percentual));
+  }
   const ps = d.despesas_loja_parcelas||[];
   mensal = d.mensal ? { ativo:true, reaj:(d.reajustes||[]).map(x => ({ mes:x.mes, tipo:x.tipo, valor:fmtNum(x.valor), anual:!!x.anual })) } : { ativo:false, reaj:[] };
   editando = { ...d, _mesInicial: ps.length ? ps[0].mes_apuracao.slice(0,7) : hojeISO().slice(0,7) };
