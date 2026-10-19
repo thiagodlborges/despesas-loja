@@ -370,7 +370,7 @@ function renderNova(){
         '<div class="field"><label id="dValorLbl">'+(mensal.ativo?'Valor mensal (R$)':rateio.ativo?'Valor total a ratear (R$)':'Valor total (R$)')+'</label><input class="inp num" id="dValor" inputmode="decimal" placeholder="0,00" value="'+(e?fmtNum(mensal.ativo?e.valor_mensal:e.rateio_id?e.rateio_valor_total:e.valor_total):'')+'" oninput="atualizarPreview()"></div>'+
         '<div class="field"><label>'+(mensal.ativo?'Primeiro mês':'Mês de apuração inicial')+'</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
         '<div class="field"><label>'+(mensal.ativo?'Meses de previsão (máx. 60)':'Nº de meses (parcelas)')+'</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:(mensal.ativo?60:1))+'" oninput="atualizarPreview()">'+
-          (e ? '<button class="lnk" type="button" style="margin-top:4px" onclick="provisionar12()">Provisionar 12 meses</button>' : '')+'</div>'+
+          (e ? '<button class="lnk" type="button" style="margin-top:4px" onclick="dividir12()">Dividir em 12 meses</button>' : '')+'</div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
       '</div>'+
       (mensal.ativo ? '<div id="dReajBox"></div>' : '')+
@@ -384,7 +384,7 @@ function renderNova(){
   atualizarPreview();
 }
 
-function provisionar12(){ $('dQtd').value = 12; atualizarPreview(); }
+function dividir12(){ $('dQtd').value = 12; atualizarPreview(); }
 
 function onDestinoChange(){
   rateio.ativo = $('dDestino').value === 'rateio';
