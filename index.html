@@ -87,6 +87,10 @@
   .inp.pct{width:72px;padding:5px 8px;font-size:.82rem}
   .rateio-rodape{font-size:.78rem;color:var(--text-light);margin-top:10px}
   .badge-rateio{display:inline-block;margin-top:3px;padding:2px 8px;border-radius:20px;font-size:.66rem;font-weight:600;background:#EFE6F4;color:#5E3F7B;white-space:nowrap}
+  .badge-prov{display:inline-block;margin-top:3px;padding:2px 8px;border-radius:20px;font-size:.66rem;font-weight:600;background:#FFF1D6;color:#8A5A00;white-space:nowrap}
+  .badge-ok{display:inline-block;padding:2px 8px;border-radius:20px;font-size:.66rem;font-weight:600;background:#E3F3E8;color:#1F7A3E;white-space:nowrap}
+  .chk{display:flex;align-items:center;gap:8px;font-size:.84rem;cursor:pointer;min-height:38px}
+  .chk input{width:16px;height:16px;accent-color:var(--bordo)}
   .empty{text-align:center;padding:40px;color:var(--text-light);font-size:.85rem}
   .loading{text-align:center;padding:30px;color:var(--text-light)}
 
@@ -132,6 +136,7 @@
   <div class="tab active" data-tab="nova" onclick="mudarTab('nova')">➕ Nova Despesa</div>
   <div class="tab" data-tab="lancamentos" onclick="mudarTab('lancamentos')">📋 Lançamentos</div>
   <div class="tab" data-tab="apuracao" onclick="mudarTab('apuracao')">📊 Apuração Mensal</div>
+  <div class="tab" data-tab="provisoes" onclick="mudarTab('provisoes')">⏳ Provisões</div>
 </nav>
 
 <main id="mainContent"><div class="loading">Carregando…</div></main>
@@ -291,6 +296,7 @@ function mudarTab(tab){
 function renderTab(){
   if(currentTab==='nova') renderNova();
   else if(currentTab==='lancamentos') renderLancamentos();
+  else if(currentTab==='provisoes') renderProvisoes();
   else renderApuracao();
 }
 
@@ -371,6 +377,8 @@ function renderNova(){
         '<div class="field"><label>'+(mensal.ativo?'Primeiro mês':'Mês de apuração inicial')+'</label><input class="inp" type="month" id="dMes" value="'+mesIni+'" onchange="atualizarPreview()"></div>'+
         '<div class="field"><label>'+(mensal.ativo?'Meses de previsão (máx. 60)':'Nº de meses (parcelas)')+'</label><input class="inp num" type="number" min="1" max="60" step="1" id="dQtd" value="'+(e?e.qtd_parcelas:(mensal.ativo?60:1))+'" oninput="atualizarPreview()">'+
           (e ? '<button class="lnk" type="button" style="margin-top:4px" onclick="dividir12()">Dividir em 12 meses</button>' : '')+'</div>'+
+        '<div class="field span2"><label>Nº da nota fiscal (opcional)</label><input class="inp" id="dNF" maxlength="60" value="'+esc(e?e.nota_fiscal||'':'')+'"'+(e&&e.provisao?' disabled':'')+'></div>'+
+        '<div class="field span2"><label>&nbsp;</label><label class="chk" style="text-transform:none;letter-spacing:0;font-size:.84rem;color:var(--text)"><input type="checkbox" id="dProv"'+(e&&e.provisao?' checked':'')+' onchange="onProvChange()"> Lançar como provisão (NF ainda não recebida)</label></div>'+
         '<div class="field span4"><label>Observação (opcional)</label><textarea class="inp" id="dObs" rows="2">'+esc(e?e.observacao||'':'')+'</textarea></div>'+
       '</div>'+
       (mensal.ativo ? '<div id="dReajBox"></div>' : '')+
@@ -541,6 +549,12 @@ function atualizarPreview(){
     '<div class="chips">'+parcelas.map(p => '<span class="chip">'+p.numero+'/'+qtd+' · '+fmtMes(p.mes)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+'</div>';
 }
 
+function onProvChange(){
+  const nf = $('dNF'), on = $('dProv').checked;
+  if(on) nf.value = '';
+  nf.disabled = on;
+}
+
 function cancelarEdicao(){ editando = null; mensal = { ativo:false, reaj:[] }; mudarTab('lancamentos'); }
 
 async function salvarDespesa(){
@@ -553,6 +567,8 @@ async function salvarDespesa(){
   const mes = $('dMes').value;
   const qtd = parseInt($('dQtd').value, 10);
   const obs = $('dObs').value.trim();
+  const nf = $('dNF').value.trim();
+  const prov = $('dProv').checked;
 
   if(!rateio.ativo && !loja) return showMsg('dMsg','Selecione a loja.','err');
   if(!conta) return showMsg('dMsg','Selecione a conta contábil.','err');
@@ -561,6 +577,7 @@ async function salvarDespesa(){
   if(!(valor>0)) return showMsg('dMsg','Informe um valor total válido (use vírgula para centavos).','err');
   if(!mes) return showMsg('dMsg','Informe o mês de apuração.','err');
   if(!(qtd>=1 && qtd<=60)) return showMsg('dMsg','O número de meses deve ser entre 1 e 60.','err');
+  if(prov && nf) return showMsg('dMsg','Provisão é para nota ainda não recebida: deixe o número da nota em branco.','err');
 
   let reajEnv = [];
   if(mensal.ativo){
@@ -580,7 +597,7 @@ async function salvarDespesa(){
   const comum = {
     p_conta: conta, p_descricao: desc, p_fornecedor: forn || null,
     p_data: data, p_valor_total: Math.round(valor*100)/100,
-    p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null,
+    p_mes_inicial: mes+'-01', p_qtd_meses: qtd, p_observacao: obs || null, p_nota_fiscal: nf || null,
   };
   const { data: res, error } = mensal.ativo
     ? await sb.rpc('despesas_loja_salvar_mensal', {
@@ -594,10 +611,12 @@ async function salvarDespesa(){
         p_percentuais: rateio.modo === 'percentual' ? rr.pcts.map(p => Math.round(p*10000)/10000) : null,
       })
     : await sb.rpc('despesas_loja_salvar', { ...comum, p_id: editando ? editando.id : null, p_loja: loja });
-  btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa';
-
-  if(error) return showMsg('dMsg','Erro: '+error.message,'err');
+  if(error){ btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa'; return showMsg('dMsg','Erro: '+error.message,'err'); }
   const lista = Array.isArray(res) ? res : [res];
+  // grava NF e provisão (vale para todas as partes de um rateio)
+  const { error: errProv } = await sb.rpc('despesas_loja_definir_provisao', { p_ids: lista.map(x => x.id), p_provisao: prov, p_nota_fiscal: nf || null });
+  btn.disabled = false; btn.textContent = editando ? 'Salvar alterações' : 'Lançar despesa';
+  if(errProv) return showMsg('dMsg','Lançamento salvo, mas houve erro ao gravar NF/provisão: '+errProv.message+'. Abra o lançamento e edite novamente.','err');
   const r = lista[0];
   if(editando){
     editando = null; mensal = { ativo:false, reaj:[] };
@@ -614,7 +633,7 @@ async function salvarDespesa(){
     showMsg('dMsg','Despesa '+(r&&r.numero||'')+' lançada: '+fmtMoeda(r&&r.valor_total)+(qtd>1?' em '+qtd+' meses.':'.'),'ok');
   }
   // limpa campos mantendo loja/conta/data e a seleção do rateio para lançamentos em sequência
-  $('dDesc').value=''; $('dForn').value=''; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
+  $('dDesc').value=''; $('dForn').value=''; $('dNF').value=''; $('dNF').disabled=false; $('dProv').checked=false; $('dValor').value=''; $('dQtd').value='1'; $('dObs').value='';
   atualizarPreview();
 }
 
@@ -629,7 +648,7 @@ function renderLancamentos(){
         '<div class="field" style="min-width:210px"><label>Conta contábil</label><select class="inp" id="fConta" onchange="carregarLancamentos()">'+optsContas('', true)+'</select></div>'+
         '<div class="field"><label>Filtrar por</label><select class="inp" id="fTipo" onchange="carregarLancamentos()"><option value="lanc">Mês do lançamento</option><option value="apur">Mês de apuração</option></select></div>'+
         '<div class="field"><label>Mês</label><input class="inp" type="month" id="fMes" value="'+mesAtual+'" onchange="carregarLancamentos()"></div>'+
-        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, nº…" oninput="desenharLancamentos()"></div>'+
+        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, NF, nº…" oninput="desenharLancamentos()"></div>'+
         '<button class="btn btn-outline btn-sm" onclick="exportarLancamentos()">⬇ Excel</button>'+
       '</div>'+
       '<div id="lancConteudo" class="loading">Carregando…</div>'+
@@ -674,7 +693,7 @@ async function carregarLancamentos(){
 function filtrarBusca(lista){
   const b = ($('fBusca') && $('fBusca').value || '').trim().toLowerCase();
   if(!b) return lista;
-  return lista.filter(d => [d.numero,d.descricao,d.fornecedor,d.observacao,d.registrado_por_nome].some(x => (x||'').toLowerCase().includes(b)));
+  return lista.filter(d => [d.numero,d.descricao,d.fornecedor,d.nota_fiscal,d.observacao,d.registrado_por_nome].some(x => (x||'').toLowerCase().includes(b)));
 }
 
 function desenharLancamentos(){
@@ -696,7 +715,7 @@ function desenharLancamentos(){
       (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
     '</div>'+
     '<div class="table-wrap"><table><thead><tr>'+
-      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor total</th><th>Apuração</th>'+(podeEditar?'<th></th>':'')+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th>NF</th><th class="r">Valor total</th><th>Apuração</th>'+(podeEditar?'<th></th>':'')+
     '</tr></thead><tbody>'+
     lista.map(d => {
       const ps = d.despesas_loja_parcelas||[];
@@ -706,8 +725,9 @@ function desenharLancamentos(){
         '<td>'+fmtData(d.data_lancamento)+'</td>'+
         '<td>'+esc(d.loja)+(d.rateio_id ? '<br><span class="badge-rateio" title="Rateio de '+fmtMoeda(d.rateio_valor_total)+' entre '+d.rateio_qtd_lojas+' lojas">Rateio · '+fmtNum(d.rateio_percentual)+'%</span>' : '')+'</td>'+
         '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
-        '<td>'+esc(d.descricao)+(d.mensal ? ' <span class="badge" title="Despesa mensal recorrente">Mensal · '+fmtMoeda(d.valor_mensal)+'</span>' : '')+'</td>'+
+        '<td>'+esc(d.descricao)+(d.provisao ? '<br><span class="badge-prov" title="NF ainda não recebida">Provisão</span>' : '')+(d.mensal ? ' <span class="badge" title="Despesa mensal recorrente">Mensal · '+fmtMoeda(d.valor_mensal)+'</span>' : '')+'</td>'+
         '<td>'+esc(d.fornecedor||'—')+'</td>'+
+        '<td>'+esc(d.nota_fiscal||'—')+'</td>'+
         '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
         '<td>'+periodo+'</td>'+
         (podeEditar ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
@@ -717,15 +737,15 @@ function desenharLancamentos(){
             : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
           '</td>' : '')+
       '</tr>'+
-      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(podeEditar?9:8)+'">'+
+      '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(podeEditar?10:9)+'">'+
         '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0">'+
           ps.map(p => '<span class="chip">'+p.numero_parcela+'/'+ps.length+' · '+fmtMes(p.mes_apuracao)+' · <b>'+fmtMoeda(p.valor)+'</b></span>').join('')+
         '</div>'+
         (d.rateio_id ? '<div class="hint" style="margin-bottom:4px">Parte de um rateio de <b>'+fmtMoeda(d.rateio_valor_total)+'</b> entre <b>'+d.rateio_qtd_lojas+' lojas</b> ('+(d.rateio_modo==='igual'?'por igual':'por percentual')+'). Esta loja: <b>'+fmtNum(d.rateio_percentual)+'%</b>.</div>' : '')+
-        '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+'</div>'+
+        '<div class="hint">Lançado por '+esc(d.registrado_por_nome||'—')+' em '+new Date(d.criado_em).toLocaleString('pt-BR')+(d.observacao?' · Obs.: '+esc(d.observacao):'')+(d.provisao_revertida_em?' · Provisão revertida por '+esc(d.provisao_revertida_por_nome||'—')+' em '+new Date(d.provisao_revertida_em).toLocaleString('pt-BR'):'')+'</div>'+
       '</td></tr>';
     }).join('')+
-    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(podeEditar?2:1)+'"></td></tr>'+
+    '<tr class="total-row"><td colspan="7">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(podeEditar?2:1)+'"></td></tr>'+
     '</tbody></table></div>'+
     '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':podeEditar?'Você pode editar lançamentos; a exclusão é exclusiva do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
 }
@@ -804,7 +824,7 @@ function exportarLancamentos(){
     const ps = d.despesas_loja_parcelas||[];
     return {
       'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
-      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Valor total (R$)': Number(d.valor_total),
+      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Nº NF': d.nota_fiscal||'', 'Provisão': d.provisao ? 'Sim' : 'Não', 'Valor total (R$)': Number(d.valor_total),
       'Parcelas': ps.length, 'Mês inicial': ps.length?fmtMes(ps[0].mes_apuracao):'', 'Mês final': ps.length?fmtMes(ps[ps.length-1].mes_apuracao):'',
       'Rateio entre lojas': d.rateio_id ? 'Sim' : 'Não',
       '% da loja no rateio': d.rateio_id ? Number(d.rateio_percentual) : '',
@@ -821,6 +841,140 @@ function exportarLancamentos(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), 'Lançamentos');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(parcelas), 'Parcelas');
   XLSX.writeFile(wb, 'despesas-lancamentos-'+($('fMes').value||'todos')+'.xlsx');
+}
+
+// ── PROVISÕES ─────────────────────────────────────────────
+let cacheProvisoes = [];
+
+function renderProvisoes(){
+  $('mainContent').innerHTML =
+    '<div class="card">'+
+      '<h2>Provisões a reverter</h2>'+
+      '<p class="hint" style="margin-bottom:12px">Despesas lançadas sem nota fiscal. Quando a NF chegar, use <b>Reverter provisão</b> para informar o número e tirar o lançamento desta lista.</p>'+
+      '<div class="row">'+
+        '<div class="field" style="min-width:190px"><label>Loja</label><select class="inp" id="pLoja" onchange="carregarProvisoes()">'+optsLojas(minhasLojas.length>1?'':minhasLojas[0], true)+'</select></div>'+
+        '<div class="field"><label>Situação</label><select class="inp" id="pSit" onchange="carregarProvisoes()"><option value="pend">Pendentes</option><option value="rev">Já revertidas</option></select></div>'+
+        '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="pBusca" placeholder="Descrição, fornecedor, nº…" oninput="desenharProvisoes()"></div>'+
+        '<button class="btn btn-outline btn-sm" onclick="exportarProvisoes()">⬇ Excel</button>'+
+      '</div>'+
+      '<div id="provConteudo" class="loading">Carregando…</div>'+
+    '</div>';
+  carregarProvisoes();
+}
+
+async function carregarProvisoes(){
+  const wrap = $('provConteudo'); wrap.className='loading'; wrap.innerHTML='Carregando…';
+  const loja = $('pLoja').value, sit = $('pSit').value;
+  try{
+    cacheProvisoes = await buscarTudo(() => {
+      let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
+      if(loja) q = q.eq('loja', loja);
+      q = sit==='pend' ? q.eq('provisao', true) : q.eq('provisao', false).not('provisao_revertida_em', 'is', null);
+      return sit==='pend'
+        ? q.order('data_lancamento', { ascending:true }).order('numero', { ascending:true })
+        : q.order('provisao_revertida_em', { ascending:false }).order('numero', { ascending:false });
+    });
+    desenharProvisoes();
+  }catch(err){
+    wrap.className='empty'; wrap.innerHTML = 'Erro ao carregar: '+esc(err.message);
+  }
+}
+
+function listaProvisoesFiltrada(){
+  const b = ($('pBusca') && $('pBusca').value || '').trim().toLowerCase();
+  if(!b) return cacheProvisoes;
+  return cacheProvisoes.filter(d => [d.numero,d.descricao,d.fornecedor,d.loja,d.conta_contabil,d.nota_fiscal].some(x => (x||'').toLowerCase().includes(b)));
+}
+
+function diasDesde(iso){
+  const a = new Date(iso+'T12:00'), h = new Date(hojeISO()+'T12:00');
+  return Math.max(0, Math.round((h - a) / 86400000));
+}
+
+function desenharProvisoes(){
+  const wrap = $('provConteudo'); if(!wrap) return;
+  const pend = $('pSit').value === 'pend';
+  const lista = listaProvisoesFiltrada();
+  if(!lista.length){ wrap.className='empty'; wrap.innerHTML = pend ? 'Nenhuma provisão pendente. 🎉' : 'Nenhuma provisão revertida encontrada.'; return; }
+  wrap.className='';
+  const total = lista.reduce((a,d)=>a+Number(d.valor_total),0);
+  const porLoja = {}; lista.forEach(d => porLoja[d.loja] = (porLoja[d.loja]||0) + Number(d.valor_total));
+  const maisAntiga = pend ? Math.max(...lista.map(d => diasDesde(d.data_lancamento))) : null;
+
+  wrap.innerHTML =
+    '<div class="stat-box">'+
+      '<div class="stat"><div class="num">'+lista.length+'</div><div class="lbl">'+(pend?'Provisões pendentes':'Provisões revertidas')+'</div></div>'+
+      '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">'+(pend?'Valor a reverter':'Valor revertido')+'</div></div>'+
+      (pend ? '<div class="stat"><div class="num">'+maisAntiga+'</div><div class="lbl">Dias da provisão mais antiga</div></div>' : '')+
+    '</div>'+
+    (Object.keys(porLoja).length>1 ? '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">'+
+      Object.keys(porLoja).sort().map(l => '<span class="chip">'+esc(l)+' · <b>'+fmtMoeda(porLoja[l])+'</b></span>').join('')+'</div>' : '')+
+    '<div class="table-wrap"><table><thead><tr>'+
+      '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor</th>'+
+      (pend ? '<th class="r">Dias em aberto</th><th></th>' : '<th>NF</th><th>Revertida em</th><th>Por</th>')+
+    '</tr></thead><tbody>'+
+    lista.map(d => {
+      const dias = pend ? diasDesde(d.data_lancamento) : 0;
+      return '<tr>'+
+        '<td><b>'+esc(d.numero)+'</b></td>'+
+        '<td>'+fmtData(d.data_lancamento)+'</td>'+
+        '<td>'+esc(d.loja)+(d.rateio_id ? '<br><span class="badge-rateio" title="Rateio de '+fmtMoeda(d.rateio_valor_total)+' entre '+d.rateio_qtd_lojas+' lojas">Rateio · '+fmtNum(d.rateio_percentual)+'%</span>' : '')+'</td>'+
+        '<td><span class="badge">'+esc(d.conta_contabil)+'</span></td>'+
+        '<td>'+esc(d.descricao)+'</td>'+
+        '<td>'+esc(d.fornecedor||'—')+'</td>'+
+        '<td class="r">'+fmtMoeda(d.valor_total)+'</td>'+
+        (pend
+          ? '<td class="r"'+(dias>30?' style="color:#B43C3C;font-weight:600"':'')+'>'+dias+'</td>'+
+            '<td style="white-space:nowrap"><button class="btn btn-sm" onclick="reverterProvisao(\''+d.id+'\')">Reverter provisão</button></td>'
+          : '<td>'+esc(d.nota_fiscal||'—')+'</td>'+
+            '<td>'+(d.provisao_revertida_em ? new Date(d.provisao_revertida_em).toLocaleDateString('pt-BR') : '—')+'</td>'+
+            '<td>'+esc(d.provisao_revertida_por_nome||'—')+'</td>')+
+      '</tr>';
+    }).join('')+
+    '<tr class="total-row"><td colspan="6">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(pend?2:3)+'"></td></tr>'+
+    '</tbody></table></div>';
+}
+
+function reverterProvisao(id){
+  const d = cacheProvisoes.find(x=>x.id===id); if(!d) return;
+  const m = $('modalProv'); if(m) m.remove();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="modalProv" style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50">'+
+      '<div class="card" style="max-width:440px;width:92%;margin:0">'+
+        '<h2>Reverter provisão · '+esc(d.numero)+'</h2>'+
+        '<p class="hint" style="margin-bottom:10px">'+esc(d.descricao)+' · <b>'+fmtMoeda(d.valor_total)+'</b>'+
+          (d.rateio_id ? '<br><b>Rateio:</b> a reversão vale para as '+d.rateio_qtd_lojas+' lojas do rateio.' : '')+'</p>'+
+        '<div class="field"><label>Nº da nota fiscal recebida</label><input class="inp" id="provNF" maxlength="60" placeholder="Ex.: 12345"></div>'+
+        '<div class="msg" id="provMsg"></div>'+
+        '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="btnProv" onclick="confirmarReversao(\''+id+'\')">Reverter</button>'+
+        '<button class="btn" style="background:#888" onclick="$(\'modalProv\').remove()">Cancelar</button></div>'+
+      '</div></div>');
+  $('provNF').focus();
+}
+
+async function confirmarReversao(id){
+  const nf = $('provNF').value.trim();
+  if(!nf) return showMsg('provMsg','Informe o número da nota fiscal recebida.','err');
+  const btn = $('btnProv'); btn.disabled = true; btn.textContent = 'Revertendo…';
+  const { error } = await sb.rpc('despesas_loja_reverter_provisao', { p_id: id, p_nota_fiscal: nf });
+  if(error){ btn.disabled = false; btn.textContent = 'Reverter'; return showMsg('provMsg','Erro: '+error.message,'err'); }
+  $('modalProv').remove();
+  carregarProvisoes();
+}
+
+function exportarProvisoes(){
+  const lista = listaProvisoesFiltrada();
+  if(!lista.length){ alert('Não há dados para exportar.'); return; }
+  const pend = $('pSit').value === 'pend';
+  const linhas = lista.map(d => ({
+    'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
+    'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Valor (R$)': Number(d.valor_total),
+    ...(pend ? { 'Dias em aberto': diasDesde(d.data_lancamento) }
+             : { 'Nº NF': d.nota_fiscal||'', 'Revertida em': d.provisao_revertida_em ? new Date(d.provisao_revertida_em).toLocaleDateString('pt-BR') : '', 'Revertida por': d.provisao_revertida_por_nome||'' }),
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), pend ? 'Provisões pendentes' : 'Provisões revertidas');
+  XLSX.writeFile(wb, 'despesas-provisoes-'+(pend?'pendentes':'revertidas')+'-'+hojeISO()+'.xlsx');
 }
 
 // ── APURAÇÃO MENSAL ───────────────────────────────────────
