@@ -153,7 +153,7 @@ const SLUG = 'despesas_loja';
 const $ = id => document.getElementById(id);
 
 const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Praça da Moça - Diadema','Buriti Mogi Guaçu','SP Market','Iguatemi Campinas','Shopping Itaquera','Atrium'];
-const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
+const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Publicidade e Propaganda','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
 const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
 let meuPerfil = null;
@@ -768,8 +768,8 @@ function desenharLancamentos(){
         (podeEditar ? '<td style="white-space:nowrap" onclick="event.stopPropagation()">'+
           '<button class="lnk" onclick="alterarConta(\''+d.id+'\')">Alterar conta</button> · '+
           (d.rateio_id
-            ? '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar rateio</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
-            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(souMaster ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
+            ? '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar rateio</button>'+(podeEditar ? ' · <button class="lnk danger" onclick="excluirRateio(\''+d.rateio_id+'\')">Excluir rateio</button>' : '')
+            : '<button class="lnk" onclick="editarDespesa(\''+d.id+'\')">Editar</button>'+(podeEditar ? ' · <button class="lnk danger" onclick="excluirDespesa(\''+d.id+'\')">Excluir</button>' : ''))+
           '</td>' : '')+
       '</tr>'+
       '<tr class="det" id="det_'+d.id+'" style="display:none"><td colspan="'+(podeEditar?10:9)+'">'+
@@ -782,7 +782,7 @@ function desenharLancamentos(){
     }).join('')+
     '<tr class="total-row"><td colspan="7">Total</td><td class="r">'+fmtMoeda(total)+'</td><td colspan="'+(podeEditar?2:1)+'"></td></tr>'+
     '</tbody></table></div>'+
-    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(souMaster?'Edição e exclusão são exclusivas do master.':podeEditar?'Você pode editar lançamentos; a exclusão é exclusiva do master.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
+    '<p class="hint" style="margin-top:10px">Clique numa linha para ver as parcelas. '+(podeEditar?'Você pode editar e excluir lançamentos.':'Lançamentos não podem ser editados ou excluídos por aqui. Em caso de erro, fale com o master.')+'</p>';
 }
 
 function toggleDet(id){ const r = $('det_'+id); if(r) r.style.display = r.style.display==='none' ? '' : 'none'; }
