@@ -153,6 +153,8 @@ const SLUG = 'despesas_loja';
 const $ = id => document.getElementById(id);
 
 const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Praça da Moça - Diadema','Buriti Mogi Guaçu','SP Market','Iguatemi Campinas','Shopping Itaquera','Atrium'];
+const CONTA_AVULSA = 'Publicidade e Propaganda';
+const GRUPO_DIRETAS = 'Demais Despesas Diretas';
 const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Publicidade e Propaganda','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
 const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
@@ -1060,6 +1062,15 @@ async function carregarApuracao(){
   }
 }
 
+function linhasPorConta(mat){
+  const subs = Object.keys(mat).filter(c => c !== CONTA_AVULSA);
+  const soma = Array(12).fill(0);
+  subs.forEach(c => mat[c].forEach((v,i) => soma[i]+=v));
+  const linhas = [[GRUPO_DIRETAS, soma, 'grupo']].concat(subs.map(c => [c, mat[c], 'sub']));
+  if(mat[CONTA_AVULSA]) linhas.push([CONTA_AVULSA, mat[CONTA_AVULSA]]);
+  return linhas;
+}
+
 function desenharApuracao(){
   const { ano, loja, mat, porLoja } = cacheApuracao;
   const wrap = $('apurConteudo'); wrap.className='';
@@ -1073,7 +1084,7 @@ function desenharApuracao(){
 
   const tabela = (titulo, linhas) =>
     '<div class="table-wrap"><table class="matriz"><thead>'+head.replace('__', titulo)+'</thead><tbody>'+
-      linhas.map(([nome, arr]) => '<tr><td>'+esc(nome)+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
+      linhas.map(([nome, arr, tipo]) => '<tr'+(tipo==='grupo'?' style="font-weight:600;background:var(--creme)"':'')+'><td'+(tipo==='sub'?' style="padding-left:28px"':'')+'>'+esc(nome)+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
       '<tr class="total-row"><td>Total</td>'+totMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno)+'</td></tr>'+
     '</tbody></table></div>';
 
@@ -1084,7 +1095,7 @@ function desenharApuracao(){
       '<div class="stat"><div class="num">'+fmtMoeda(mesesComValor?totAno/mesesComValor:0)+'</div><div class="lbl">Média por mês com despesa</div></div>'+
     '</div>'+
     '<h3>Por conta contábil (R$)</h3>'+
-    tabela('Conta contábil', Object.keys(mat).map(c => [c, mat[c]]))+
+    tabela('Conta contábil', linhasPorConta(mat))+
     (!loja && lojasOrd.length ? '<h3 style="margin-top:24px">Por loja (R$)</h3>'+tabela('Loja', lojasOrd.map(l => [l, porLoja[l]])) : '');
 }
 
@@ -1099,7 +1110,7 @@ function exportarApuracao(){
     return o;
   };
   const totMes = Array(12).fill(0); Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
-  const porConta = Object.keys(mat).map(c => linha('Conta contábil', c, mat[c]));
+  const porConta = linhasPorConta(mat).map(([c, arr, tipo]) => linha('Conta contábil', tipo==='sub' ? '   '+c : c, arr));
   porConta.push(linha('Conta contábil','TOTAL', totMes));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porConta), 'Por conta');
