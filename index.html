@@ -153,6 +153,8 @@ const SLUG = 'despesas_loja';
 const $ = id => document.getElementById(id);
 
 const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Praça da Moça - Diadema','Buriti Mogi Guaçu','SP Market','Iguatemi Campinas','Shopping Itaquera','Atrium'];
+const ADM = 'Administrativo';          // centro de custo fora das lojas
+const FILTRO_LOJAS = '__LOJAS__';    // filtro: soma só das lojas (sem Administrativo)
 const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Publicidade e Propaganda','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
 const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
@@ -217,9 +219,18 @@ async function buscarTudo(queryFactory){
 
 function optsLojas(sel, incluirTodas){
   let h = '';
-  if(incluirTodas && minhasLojas.length > 1) h += '<option value="">Todas as lojas</option>';
+  if(incluirTodas && minhasLojas.length > 1){
+    const temAdm = minhasLojas.includes(ADM);
+    h += '<option value="">'+(temAdm ? 'Lojas + Administrativo' : 'Todas as lojas')+'</option>';
+    if(temAdm) h += '<option value="'+FILTRO_LOJAS+'">Somente lojas (sem Administrativo)</option>';
+  }
   h += minhasLojas.map(l => '<option value="'+esc(l)+'"'+(l===sel?' selected':'')+'>'+esc(l)+'</option>').join('');
   return h;
+}
+function filtrarLoja(q, loja, col){
+  col = col || 'loja';
+  if(loja === FILTRO_LOJAS) return q.neq(col, ADM);
+  return loja ? q.eq(col, loja) : q;
 }
 function optsContas(sel, incluirTodas){
   return (incluirTodas?'<option value="">Todas as contas</option>':'') +
@@ -272,7 +283,7 @@ async function verificarAcessoEIniciar(){
     if(!session) irParaLogin();
   });
 
-  if(['master','master_loja','backoffice'].includes(perfil.tipo) || perfil.despesas_loja_backoffice === true) minhasLojas = [...TODAS_LOJAS];
+  if(['master','master_loja','backoffice'].includes(perfil.tipo) || perfil.despesas_loja_backoffice === true) minhasLojas = [...TODAS_LOJAS, ADM];
   else if(perfil.lojas && perfil.lojas.length) minhasLojas = perfil.lojas;
   else if(perfil.loja) minhasLojas = [perfil.loja];
   else minhasLojas = [];
@@ -305,7 +316,8 @@ function renderTab(){
 let rateio = { ativo:false, modo:'igual', lojas:new Set(), pcts:{} };
 // Despesa mensal (recorrente): replicada em todos os meses da previsão, com reajustes programados
 let mensal = { ativo:false, reaj:[] };   // reaj: [{mes:'YYYY-MM', tipo:'percentual'|'valor', valor:'', anual:bool}]
-function podeRatear(){ return (!editando || !!editando.rateio_id) && minhasLojas.length > 1; }
+function lojasRateio(){ return minhasLojas.filter(l => l !== ADM); }
+function podeRatear(){ return (!editando || !!editando.rateio_id) && lojasRateio().length > 1; }
 
 function reajustesValidos(){
   return mensal.reaj.map(x => ({ mes:x.mes, tipo:x.tipo, valor:parseNumBR(String(x.valor)), anual: x.tipo==='percentual' && !!x.anual }))
@@ -406,7 +418,7 @@ function onDestinoChange(){
   atualizarPreview();
 }
 
-function lojasRateioOrdenadas(){ return minhasLojas.filter(l => rateio.lojas.has(l)); }
+function lojasRateioOrdenadas(){ return lojasRateio().filter(l => rateio.lojas.has(l)); }
 
 function renderRateioBox(){
   const box = $('dRateioBox'); if(!box) return;
@@ -424,7 +436,7 @@ function renderRateioBox(){
         (perc ? '<button class="btn btn-outline btn-sm" type="button" onclick="distribuirPctIgual()">Dividir % por igual</button>' : '')+
       '</div>'+
       '<div class="lojas-grid">'+
-        minhasLojas.map((l,i) => {
+        lojasRateio().map((l,i) => {
           const on = rateio.lojas.has(l);
           return '<label class="loja-opt'+(on?' on':'')+'">'+
             '<input type="checkbox" '+(on?'checked':'')+' onchange="toggleLojaRateio('+i+', this.checked)">'+
@@ -443,16 +455,16 @@ function onModoRateio(){
   renderRateioBox(); atualizarPreview();
 }
 function marcarTodasLojas(sim){
-  rateio.lojas = sim ? new Set(minhasLojas) : new Set();
+  rateio.lojas = sim ? new Set(lojasRateio()) : new Set();
   if(rateio.modo === 'percentual') distribuirPctIgual(true);
   renderRateioBox(); atualizarPreview();
 }
 function toggleLojaRateio(i, marcado){
-  const l = minhasLojas[i];
+  const l = lojasRateio()[i];
   if(marcado) rateio.lojas.add(l); else { rateio.lojas.delete(l); delete rateio.pcts[l]; }
   renderRateioBox(); atualizarPreview();
 }
-function setPctLoja(i, v){ rateio.pcts[minhasLojas[i]] = v; atualizarPreview(); }
+function setPctLoja(i, v){ rateio.pcts[lojasRateio()[i]] = v; atualizarPreview(); }
 function distribuirPctIgual(semRender){
   const ls = lojasRateioOrdenadas(); if(!ls.length) return;
   const base = Math.floor(10000/ls.length)/100;           // 2 casas, resto na última
@@ -706,7 +718,7 @@ async function carregarLancamentos(){
     for(const bloco of blocos){
       const parte = await buscarTudo(() => {
         let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
-        if(loja) q = q.eq('loja', loja);
+        q = filtrarLoja(q, loja);
         if(conta) q = q.eq('conta_contabil', conta);
         if(bloco) q = q.in('id', bloco);
         else if(mes){
@@ -743,10 +755,17 @@ function desenharLancamentos(){
     ? lista.reduce((a,d)=>a+(d.despesas_loja_parcelas||[]).filter(p=>p.mes_apuracao.slice(0,7)===mes).reduce((s,p)=>s+Number(p.valor),0),0)
     : null;
 
+  const totAdm = lista.filter(d => d.loja===ADM).reduce((a,d)=>a+Number(d.valor_total),0);
+  const mostraSplit = minhasLojas.includes(ADM) && !$('fLoja').value;
+  const cardsSplit = mostraSplit
+    ? '<div class="stat"><div class="num">'+fmtMoeda(total-totAdm)+'</div><div class="lbl">Total das lojas</div></div>'+
+      '<div class="stat"><div class="num">'+fmtMoeda(totAdm)+'</div><div class="lbl">Administrativo</div></div>'+
+      '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">Lojas + Administrativo</div></div>'
+    : '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">Valor total lançado</div></div>';
   wrap.innerHTML =
     '<div class="stat-box">'+
       '<div class="stat"><div class="num">'+lista.length+'</div><div class="lbl">Lançamentos</div></div>'+
-      '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">Valor total lançado</div></div>'+
+      cardsSplit+
       (noMes!=null ? '<div class="stat"><div class="num">'+fmtMoeda(noMes)+'</div><div class="lbl">Apropriado em '+fmtMes(mes)+'</div></div>' : '')+
     '</div>'+
     '<div class="table-wrap"><table><thead><tr>'+
@@ -903,7 +922,7 @@ async function carregarProvisoes(){
   try{
     cacheProvisoes = await buscarTudo(() => {
       let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
-      if(loja) q = q.eq('loja', loja);
+      q = filtrarLoja(q, loja);
       q = sit==='pend' ? q.eq('provisao', true) : q.eq('provisao', false).not('provisao_revertida_em', 'is', null);
       return sit==='pend'
         ? q.order('data_lancamento', { ascending:true }).order('numero', { ascending:true })
@@ -942,7 +961,8 @@ function desenharProvisoes(){
       '<div class="stat"><div class="num">'+fmtMoeda(total)+'</div><div class="lbl">'+(pend?'Valor a reverter':'Valor revertido')+'</div></div>'+
       (pend ? '<div class="stat"><div class="num">'+maisAntiga+'</div><div class="lbl">Dias da provisão mais antiga</div></div>' : '')+
     '</div>'+
-    (Object.keys(porLoja).length>1 ? '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">'+
+    (Object.keys(porLoja).length>1 || porLoja[ADM] ? '<div class="chips" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">'+
+      (porLoja[ADM] ? '<span class="chip">Total das lojas · <b>'+fmtMoeda(total-porLoja[ADM])+'</b></span><span class="chip">Lojas + Administrativo · <b>'+fmtMoeda(total)+'</b></span>' : '')+
       Object.keys(porLoja).sort().map(l => '<span class="chip">'+esc(l)+' · <b>'+fmtMoeda(porLoja[l])+'</b></span>').join('')+'</div>' : '')+
     '<div class="table-wrap"><table><thead><tr>'+
       '<th>Nº</th><th>Data</th><th>Loja</th><th>Conta contábil</th><th>Descrição</th><th>Fornecedor</th><th class="r">Valor</th>'+
@@ -1039,7 +1059,7 @@ async function carregarApuracao(){
       let q = sb.from('despesas_loja_parcelas')
         .select('mes_apuracao, valor, despesas_loja!inner(loja, conta_contabil)')
         .gte('mes_apuracao', ano+'-01-01').lte('mes_apuracao', ano+'-12-01');
-      if(loja) q = q.eq('despesas_loja.loja', loja);
+      q = filtrarLoja(q, loja, 'despesas_loja.loja');
       return q.order('id');
     });
     // matriz conta × mês
@@ -1067,25 +1087,36 @@ function desenharApuracao(){
   const totMes = Array(12).fill(0);
   Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
   const totAno = totMes.reduce((a,b)=>a+b,0);
+  const admMes = porLoja[ADM] || Array(12).fill(0);
+  const lojasMes = totMes.map((v,i)=>v-admMes[i]);
+  const totAdm = admMes.reduce((a,b)=>a+b,0);
+  const temAdm = !loja && totAdm !== 0;
   const mesesComValor = totMes.filter(v=>r2(v)!==0).length;
   const cel = v => r2(v)===0 ? '<td class="r zero">—</td>' : '<td class="r">'+fmtNum(v)+'</td>';
   const head = '<tr><th>__</th>'+MESES_ABREV.map(m=>'<th class="r">'+m+'</th>').join('')+'<th class="r">Total</th></tr>';
 
-  const tabela = (titulo, linhas) =>
+  const tabela = (titulo, linhas, rodape) =>
     '<div class="table-wrap"><table class="matriz"><thead>'+head.replace('__', titulo)+'</thead><tbody>'+
       linhas.map(([nome, arr]) => '<tr><td>'+esc(nome)+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
-      '<tr class="total-row"><td>Total</td>'+totMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno)+'</td></tr>'+
+      (rodape || '<tr class="total-row"><td>Total</td>'+totMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno)+'</td></tr>')+
     '</tbody></table></div>';
+  const linhaTot = (nome, arr, cls) => '<tr class="'+cls+'"><td>'+nome+'</td>'+arr.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</td></tr>';
+  const rodapeSplit = '<tr class="total-row"><td>Total das lojas</td>'+lojasMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno-totAdm)+'</td></tr>'+
+    linhaTot('Administrativo', admMes, 'total-row')+linhaTot('Lojas + Administrativo', totMes, 'total-row');
 
   const lojasOrd = Object.keys(porLoja).sort();
   wrap.innerHTML =
     '<div class="stat-box">'+
-      '<div class="stat"><div class="num">'+fmtMoeda(totAno)+'</div><div class="lbl">Total '+ano+(loja?' · '+esc(loja):'')+'</div></div>'+
+      (temAdm
+        ? '<div class="stat"><div class="num">'+fmtMoeda(totAno-totAdm)+'</div><div class="lbl">Total das lojas '+ano+'</div></div>'+
+          '<div class="stat"><div class="num">'+fmtMoeda(totAdm)+'</div><div class="lbl">Administrativo '+ano+'</div></div>'+
+          '<div class="stat"><div class="num">'+fmtMoeda(totAno)+'</div><div class="lbl">Lojas + Administrativo '+ano+'</div></div>'
+        : '<div class="stat"><div class="num">'+fmtMoeda(totAno)+'</div><div class="lbl">Total '+ano+(loja===FILTRO_LOJAS?' · somente lojas':loja?' · '+esc(loja):'')+'</div></div>')+
       '<div class="stat"><div class="num">'+fmtMoeda(mesesComValor?totAno/mesesComValor:0)+'</div><div class="lbl">Média por mês com despesa</div></div>'+
     '</div>'+
     '<h3>Por conta contábil (R$)</h3>'+
-    tabela('Conta contábil', Object.keys(mat).map(c => [c, mat[c]]))+
-    (!loja && lojasOrd.length ? '<h3 style="margin-top:24px">Por loja (R$)</h3>'+tabela('Loja', lojasOrd.map(l => [l, porLoja[l]])) : '');
+    tabela('Conta contábil', Object.keys(mat).map(c => [c, mat[c]]), temAdm ? rodapeSplit : null)+
+    ((!loja || loja===FILTRO_LOJAS) && lojasOrd.length ? '<h3 style="margin-top:24px">Por loja (R$)</h3>'+tabela('Loja', lojasOrd.filter(l=>l!==ADM).map(l => [l, porLoja[l]]), temAdm ? rodapeSplit : null) : '');
 }
 
 function exportarApuracao(){
@@ -1100,15 +1131,20 @@ function exportarApuracao(){
   };
   const totMes = Array(12).fill(0); Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
   const porConta = Object.keys(mat).map(c => linha('Conta contábil', c, mat[c]));
-  porConta.push(linha('Conta contábil','TOTAL', totMes));
+  const admMes = porLoja[ADM] || Array(12).fill(0);
+  const temAdm = !loja && admMes.some(v=>v!==0);
+  const rodapeX = rot => temAdm
+    ? [linha(rot,'Total das lojas', totMes.map((v,i)=>v-admMes[i])), linha(rot,'Administrativo', admMes), linha(rot,'Lojas + Administrativo', totMes)]
+    : [linha(rot,'TOTAL', totMes)];
+  porConta.push(...rodapeX('Conta contábil'));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(porConta), 'Por conta');
-  if(!loja){
-    const pl = Object.keys(porLoja).sort().map(l => linha('Loja', l, porLoja[l]));
-    pl.push(linha('Loja','TOTAL', totMes));
+  if(!loja || loja===FILTRO_LOJAS){
+    const pl = Object.keys(porLoja).sort().filter(l=>l!==ADM).map(l => linha('Loja', l, porLoja[l]));
+    pl.push(...rodapeX('Loja'));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pl), 'Por loja');
   }
-  XLSX.writeFile(wb, 'despesas-apuracao-'+ano+(loja?'-'+loja.replace(/\s+/g,'_'):'')+'.xlsx');
+  XLSX.writeFile(wb, 'despesas-apuracao-'+ano+(loja&&loja!==FILTRO_LOJAS?'-'+loja.replace(/\s+/g,'_'):loja?'-lojas':'')+'.xlsx');
 }
 
 verificarAcessoEIniciar();
