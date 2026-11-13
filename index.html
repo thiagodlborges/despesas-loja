@@ -693,44 +693,49 @@ function renderLancamentos(){
       '<div class="row">'+
         '<div class="field" style="min-width:190px"><label>Loja</label><select class="inp" id="fLoja" onchange="carregarLancamentos()">'+optsLojas(minhasLojas.length>1?'':minhasLojas[0], true)+'</select></div>'+
         '<div class="field" style="min-width:210px"><label>Conta contábil</label><select class="inp" id="fConta" onchange="carregarLancamentos()">'+optsContas('', true)+'</select></div>'+
-        '<div class="field"><label>Filtrar por</label><select class="inp" id="fTipo" onchange="carregarLancamentos()"><option value="lanc">Mês do lançamento</option><option value="apur">Mês de apuração</option></select></div>'+
+        '<div class="field"><label>Filtrar por</label><select class="inp" id="fTipo" onchange="carregarLancamentos()"><option value="apur">Mês de apuração</option><option value="lanc">Mês do lançamento</option></select></div>'+
         '<div class="field"><label>Mês</label><input class="inp" type="month" id="fMes" value="'+mesAtual+'" onchange="carregarLancamentos()"></div>'+
         '<div class="field" style="flex:1;min-width:160px"><label>Buscar</label><input class="inp" id="fBusca" placeholder="Descrição, fornecedor, NF, nº…" oninput="desenharLancamentos()"></div>'+
         '<button class="btn btn-outline btn-sm" onclick="exportarLancamentos()">⬇ Excel</button>'+
       '</div>'+
+      '<p class="hint" style="margin-top:8px"><b>Mês de apuração</b> mostra tudo que pesa no mês, inclusive parcelas de compras lançadas antes. <b>Mês do lançamento</b> mostra só o que foi lançado naquele mês. O Excel sempre sai por mês de apuração.</p>'+
       '<div id="lancConteudo" class="loading">Carregando…</div>'+
     '</div>';
   carregarLancamentos();
+}
+
+async function buscarDespesas(loja, conta, tipo, mes){
+  let ids = null;
+  if(mes && tipo==='apur'){
+    const parc = await buscarTudo(() => sb.from('despesas_loja_parcelas').select('despesa_id').eq('mes_apuracao', mes+'-01'));
+    ids = [...new Set(parc.map(p=>p.despesa_id))];
+    if(!ids.length) return [];
+  }
+  const lista = [];
+  const blocos = ids ? Array.from({length:Math.ceil(ids.length/150)}, (_,i)=>ids.slice(i*150,(i+1)*150)) : [null];
+  for(const bloco of blocos){
+    const parte = await buscarTudo(() => {
+      let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
+      q = filtrarLoja(q, loja);
+      if(conta) q = q.eq('conta_contabil', conta);
+      if(bloco) q = q.in('id', bloco);
+      else if(mes){
+        q = q.gte('data_lancamento', mes+'-01').lt('data_lancamento', addMeses(mes,1)+'-01');
+      }
+      return q.order('data_lancamento', { ascending:false }).order('numero', { ascending:false });
+    });
+    lista.push(...parte);
+  }
+  lista.forEach(d => (d.despesas_loja_parcelas||[]).sort((a,b)=>a.numero_parcela-b.numero_parcela));
+  lista.sort((a,b) => (b.data_lancamento||'').localeCompare(a.data_lancamento||'') || (b.numero||'').localeCompare(a.numero||''));
+  return lista;
 }
 
 async function carregarLancamentos(){
   const wrap = $('lancConteudo'); wrap.className='loading'; wrap.innerHTML='Carregando…';
   const loja = $('fLoja').value, conta = $('fConta').value, tipo = $('fTipo').value, mes = $('fMes').value;
   try{
-    let ids = null;
-    if(mes && tipo==='apur'){
-      const parc = await buscarTudo(() => sb.from('despesas_loja_parcelas').select('despesa_id').eq('mes_apuracao', mes+'-01'));
-      ids = [...new Set(parc.map(p=>p.despesa_id))];
-      if(!ids.length){ cacheLancamentos=[]; desenharLancamentos(); return; }
-    }
-    const lista = [];
-    const blocos = ids ? Array.from({length:Math.ceil(ids.length/150)}, (_,i)=>ids.slice(i*150,(i+1)*150)) : [null];
-    for(const bloco of blocos){
-      const parte = await buscarTudo(() => {
-        let q = sb.from('despesas_loja').select('*, despesas_loja_parcelas(numero_parcela, mes_apuracao, valor)');
-        q = filtrarLoja(q, loja);
-        if(conta) q = q.eq('conta_contabil', conta);
-        if(bloco) q = q.in('id', bloco);
-        else if(mes){
-          q = q.gte('data_lancamento', mes+'-01').lt('data_lancamento', addMeses(mes,1)+'-01');
-        }
-        return q.order('data_lancamento', { ascending:false }).order('numero', { ascending:false });
-      });
-      lista.push(...parte);
-    }
-    lista.forEach(d => (d.despesas_loja_parcelas||[]).sort((a,b)=>a.numero_parcela-b.numero_parcela));
-    lista.sort((a,b) => (b.data_lancamento||'').localeCompare(a.data_lancamento||'') || (b.numero||'').localeCompare(a.numero||''));
-    cacheLancamentos = lista;
+    cacheLancamentos = await buscarDespesas(loja, conta, tipo, mes);
     desenharLancamentos();
   }catch(err){
     wrap.className='empty'; wrap.innerHTML = 'Erro ao carregar: '+esc(err.message);
@@ -871,30 +876,62 @@ async function excluirRateio(rateioId){
   carregarLancamentos();
 }
 
-function exportarLancamentos(){
-  const lista = filtrarBusca(cacheLancamentos);
-  if(!lista.length){ alert('Não há dados para exportar.'); return; }
-  const linhas = lista.map(d => {
-    const ps = d.despesas_loja_parcelas||[];
-    return {
-      'Nº': d.numero, 'Data': fmtData(d.data_lancamento), 'Loja': d.loja, 'Conta contábil': d.conta_contabil,
-      'Descrição': d.descricao, 'Fornecedor': d.fornecedor||'', 'Nº NF': d.nota_fiscal||'', 'Provisão': d.provisao ? 'Sim' : 'Não', 'Valor total (R$)': Number(d.valor_total),
-      'Parcelas': ps.length, 'Mês inicial': ps.length?fmtMes(ps[0].mes_apuracao):'', 'Mês final': ps.length?fmtMes(ps[ps.length-1].mes_apuracao):'',
-      'Rateio entre lojas': d.rateio_id ? 'Sim' : 'Não',
-      '% da loja no rateio': d.rateio_id ? Number(d.rateio_percentual) : '',
-      'Valor total do rateio (R$)': d.rateio_id ? Number(d.rateio_valor_total) : '',
-      'Lançado por': d.registrado_por_nome||'', 'Observação': d.observacao||'',
+// Relatório do mês (sempre por mês de apuração): valor da parcela do mês aberto por loja, fornecedor e nota fiscal
+async function exportarLancamentos(){
+  const mes = $('fMes').value;
+  if(!mes){ alert('Escolha o mês para gerar o relatório.'); return; }
+  const btn = document.querySelector('button[onclick="exportarLancamentos()"]');
+  const txt = btn ? btn.textContent : ''; if(btn){ btn.disabled = true; btn.textContent = 'Gerando…'; }
+  try{
+    const lista = filtrarBusca(await buscarDespesas($('fLoja').value, $('fConta').value, 'apur', mes));
+    const det = [];
+    lista.forEach(d => (d.despesas_loja_parcelas||[]).filter(p => p.mes_apuracao.slice(0,7)===mes).forEach(p => det.push({
+      loja:d.loja, forn:d.fornecedor||'', nf:d.nota_fiscal||'', valor:Number(p.valor), numero:d.numero, data:d.data_lancamento,
+      conta:d.conta_contabil, desc:d.descricao, parcela:p.numero_parcela+'/'+d.despesas_loja_parcelas.length, total:Number(d.valor_total),
+    })));
+    if(!det.length){ alert('Não há despesas apuradas em '+fmtMes(mes+'-01')+' para os filtros escolhidos.'); return; }
+    const cmp = (a,b) => (a||'').localeCompare(b||'','pt-BR');
+    det.sort((a,b) => cmp(a.loja,b.loja) || cmp(a.forn,b.forn) || cmp(a.numero,b.numero));
+    const r2 = v => Math.round(v*100)/100;
+    const rotulo = 'Valor apurado em '+mes.slice(5)+'/'+mes.slice(0,4);
+    const SEM = '(sem NF)';
+
+    const wsDet = XLSX.utils.aoa_to_sheet([
+      ['Loja','Fornecedor','Nota Fiscal',rotulo,'Nº Despesa','Data lançamento','Conta contábil','Descrição','Parcela','Valor total da despesa'],
+      ...det.map(x => [x.loja, x.forn, x.nf, x.valor, x.numero, fmtData(x.data), x.conta, x.desc, x.parcela, x.total]),
+      ['TOTAL','','', r2(det.reduce((a,x)=>a+x.valor,0)),'','','','','',''],
+    ]);
+    wsDet['!cols'] = [26,52,14,22,12,16,26,38,10,22].map(wch => ({wch}));
+    wsDet['!autofilter'] = { ref:'A1:J'+(det.length+1) };
+
+    const agrupar = (chaves, nomes) => {
+      const m = new Map();
+      det.forEach(x => {
+        const k = chaves(x); const id = k.join('\u0001');
+        if(!m.has(id)) m.set(id, { k, qtd:0, v:0 });
+        const g = m.get(id); g.qtd++; g.v += x.valor;
+      });
+      const linhas = [...m.values()].sort((a,b) => { for(let i=0;i<a.k.length;i++){ const c = cmp(a.k[i], b.k[i]); if(c) return c; } return 0; });
+      const total = ['TOTAL', ...Array(nomes.length-1).fill(''), det.length, r2(det.reduce((a,x)=>a+x.valor,0))];
+      const ws = XLSX.utils.aoa_to_sheet([[...nomes,'Qtd lançamentos',rotulo], ...linhas.map(g => [...g.k, g.qtd, r2(g.v)]), total]);
+      ws['!cols'] = [...nomes.map(n => ({wch: n==='Fornecedor'?56 : n==='Nota Fiscal'?14 : 28})), {wch:16}, {wch:24}];
+      ws['!autofilter'] = { ref:'A1:'+XLSX.utils.encode_col(nomes.length+1)+(linhas.length+1) };
+      return ws;
     };
-  });
-  const parcelas = [];
-  lista.forEach(d => (d.despesas_loja_parcelas||[]).forEach(p => parcelas.push({
-    'Nº': d.numero, 'Loja': d.loja, 'Conta contábil': d.conta_contabil, 'Descrição': d.descricao,
-    'Parcela': p.numero_parcela+'/'+d.despesas_loja_parcelas.length, 'Mês de apuração': fmtMes(p.mes_apuracao), 'Valor (R$)': Number(p.valor),
-  })));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), 'Lançamentos');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(parcelas), 'Parcelas');
-  XLSX.writeFile(wb, 'despesas-lancamentos-'+($('fMes').value||'todos')+'.xlsx');
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsDet, 'Detalhe');
+    XLSX.utils.book_append_sheet(wb, agrupar(x=>[x.loja], ['Loja']), 'Por Loja');
+    XLSX.utils.book_append_sheet(wb, agrupar(x=>[x.forn], ['Fornecedor']), 'Por Fornecedor');
+    XLSX.utils.book_append_sheet(wb, agrupar(x=>[x.loja,x.forn], ['Loja','Fornecedor']), 'Loja x Fornecedor');
+    XLSX.utils.book_append_sheet(wb, agrupar(x=>[x.forn,x.nf||SEM], ['Fornecedor','Nota Fiscal']), 'Fornecedor x Nota Fiscal');
+    const loja = $('fLoja').value;
+    XLSX.writeFile(wb, 'despesas-'+mes+(loja && loja!==FILTRO_LOJAS ? '-'+loja.replace(/\s+/g,'_') : loja ? '-lojas' : '')+'.xlsx');
+  }catch(err){
+    alert('Erro ao gerar o relatório: '+err.message);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = txt; }
+  }
 }
 
 // ── PROVISÕES ─────────────────────────────────────────────
