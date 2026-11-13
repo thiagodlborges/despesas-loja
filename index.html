@@ -71,6 +71,8 @@
   tr.clicavel:hover td{background:#FBF6EE}
   tr.det td{background:#FBF6EE;border-top:none;padding-top:0}
   table.matriz td,table.matriz th{white-space:nowrap}
+  table.matriz tr.grupo-conta td{background:var(--creme);border-top:1px solid var(--creme-dark)}
+  table.matriz tr.grupo-conta td:first-child{background:var(--creme)}
   table.matriz td:first-child,table.matriz th:first-child{position:sticky;left:0;background:var(--white);z-index:1}
   table.matriz th:first-child{background:var(--creme)}
   table.matriz tr.total-row td:first-child{background:var(--creme)}
@@ -156,6 +158,17 @@ const TODAS_LOJAS = ['Esplanada','Cianê','Tucuruvi','Indaiatuba','Jundiaí','Pr
 const ADM = 'Administrativo';          // centro de custo fora das lojas
 const FILTRO_LOJAS = '__LOJAS__';    // filtro: soma só das lojas (sem Administrativo)
 const CONTAS = ['Bens de Pequeno Valor','Copa e Cozinha','Despesas de Mobilidade','Mat. e Serv. de Limpeza','Material de Consumo','Material de Informática','Publicidade e Propaganda','Serviços Contratados','Serviços Contratados - TI','Viagens e Hospedagem'];
+// Estrutura contábil: todas as contas ficam sob "Demais Despesas Diretas", exceto Publicidade e Propaganda, que é uma linha apartada no mesmo nível.
+const CONTA_APARTADA = 'Publicidade e Propaganda';
+const GRUPO_DEMAIS = 'Demais Despesas Diretas';
+function estruturaContas(mat){
+  const soma = nomes => Array.from({length:12}, (_,i) => nomes.reduce((a,c)=>a+(mat[c]?mat[c][i]:0),0));
+  const demais = Object.keys(mat).filter(c => c !== CONTA_APARTADA);
+  const linhas = [{ nome:GRUPO_DEMAIS, arr:soma(demais), nivel:'grupo' }];
+  demais.forEach(c => linhas.push({ nome:c, arr:mat[c], nivel:'sub' }));
+  if(mat[CONTA_APARTADA]) linhas.push({ nome:CONTA_APARTADA, arr:mat[CONTA_APARTADA], nivel:'grupo' });
+  return linhas;
+}
 const MESES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 
 let meuPerfil = null;
@@ -1134,7 +1147,7 @@ function desenharApuracao(){
 
   const tabela = (titulo, linhas, rodape) =>
     '<div class="table-wrap"><table class="matriz"><thead>'+head.replace('__', titulo)+'</thead><tbody>'+
-      linhas.map(([nome, arr]) => '<tr><td>'+esc(nome)+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
+      linhas.map(([nome, arr, nivel]) => '<tr'+(nivel==='grupo'?' class="grupo-conta"':'')+'><td'+(nivel==='sub'?' style="padding-left:30px"':'')+'>'+(nivel==='grupo'?'<b>'+esc(nome)+'</b>':esc(nome))+'</td>'+arr.map(cel).join('')+'<td class="r"><b>'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</b></td></tr>').join('')+
       (rodape || '<tr class="total-row"><td>Total</td>'+totMes.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(totAno)+'</td></tr>')+
     '</tbody></table></div>';
   const linhaTot = (nome, arr, cls) => '<tr class="'+cls+'"><td>'+nome+'</td>'+arr.map(v=>'<td class="r">'+fmtNum(v)+'</td>').join('')+'<td class="r">'+fmtNum(arr.reduce((a,b)=>a+b,0))+'</td></tr>';
@@ -1152,7 +1165,7 @@ function desenharApuracao(){
       '<div class="stat"><div class="num">'+fmtMoeda(mesesComValor?totAno/mesesComValor:0)+'</div><div class="lbl">Média por mês com despesa</div></div>'+
     '</div>'+
     '<h3>Por conta contábil (R$)</h3>'+
-    tabela('Conta contábil', Object.keys(mat).map(c => [c, mat[c]]), temAdm ? rodapeSplit : null)+
+    tabela('Conta contábil', estruturaContas(mat).map(l => [l.nome, l.arr, l.nivel]), temAdm ? rodapeSplit : null)+
     ((!loja || loja===FILTRO_LOJAS) && lojasOrd.length ? '<h3 style="margin-top:24px">Por loja (R$)</h3>'+tabela('Loja', lojasOrd.filter(l=>l!==ADM).map(l => [l, porLoja[l]]), temAdm ? rodapeSplit : null) : '');
 }
 
@@ -1167,7 +1180,7 @@ function exportarApuracao(){
     return o;
   };
   const totMes = Array(12).fill(0); Object.values(mat).forEach(arr => arr.forEach((v,i)=>totMes[i]+=v));
-  const porConta = Object.keys(mat).map(c => linha('Conta contábil', c, mat[c]));
+  const porConta = estruturaContas(mat).map(l => linha('Conta contábil', l.nivel==='sub' ? '    '+l.nome : l.nome, l.arr));
   const admMes = porLoja[ADM] || Array(12).fill(0);
   const temAdm = !loja && admMes.some(v=>v!==0);
   const rodapeX = rot => temAdm
